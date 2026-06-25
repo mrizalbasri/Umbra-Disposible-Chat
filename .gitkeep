@@ -1,0 +1,10 @@
+# Backend
+touch backend/internal/handler/.gitkeep
+touch backend/internal/model/.gitkeep
+
+# Frontend
+touch frontend/src/components/chat/.gitkeep
+touch frontend/src/components/layout/.gitkeep
+touch frontend/src/components/ui/.gitkeep
+touch frontend/src/lib/crypto/.gitkeep
+touch frontend/src/lib/api/.gitkeep
