@@ -4,10 +4,18 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 // ponytail: inline helpers instead of a base64 util module — two callers, no shared module needed yet
-const toBase64 = (buf: ArrayBuffer): string =>
-	btoa(Array.from(new Uint8Array(buf), (b) => String.fromCharCode(b)).join(''));
-const fromBase64 = (s: string): Uint8Array =>
-	Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const toBase64 = (buf: ArrayBuffer | ArrayBufferView): string => {
+	const u8 = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+	return btoa(Array.from(u8, (b) => String.fromCharCode(b)).join(''));
+};
+const fromBase64 = (s: string): ArrayBuffer => {
+	const bin = atob(s);
+	const u8 = new Uint8Array(bin.length);
+	for (let i = 0; i < bin.length; i++) {
+		u8[i] = bin.charCodeAt(i);
+	}
+	return u8.buffer;
+};
 
 /** Wrap a shared secret (ArrayBuffer) into an AES-256-GCM CryptoKey. */
 export function deriveAESKey(sharedSecret: ArrayBuffer): Promise<CryptoKey> {

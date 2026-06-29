@@ -3,10 +3,18 @@
 const ECDSA_PARAMS = { name: 'ECDSA', namedCurve: 'P-256' } as const;
 const SIGN_ALGO = { name: 'ECDSA', hash: 'SHA-256' } as const;
 
-const toBase64 = (buf: ArrayBuffer): string =>
-	btoa(Array.from(new Uint8Array(buf), (b) => String.fromCharCode(b)).join(''));
-const fromBase64 = (s: string): Uint8Array =>
-	Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const toBase64 = (buf: ArrayBuffer | ArrayBufferView): string => {
+	const u8 = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+	return btoa(Array.from(u8, (b) => String.fromCharCode(b)).join(''));
+};
+const fromBase64 = (s: string): ArrayBuffer => {
+	const bin = atob(s);
+	const u8 = new Uint8Array(bin.length);
+	for (let i = 0; i < bin.length; i++) {
+		u8[i] = bin.charCodeAt(i);
+	}
+	return u8.buffer;
+};
 
 /** Generate ECDSA keypair for signing. Separate from ECDH keypair. */
 export function generateSigningKeyPair(): Promise<CryptoKeyPair> {

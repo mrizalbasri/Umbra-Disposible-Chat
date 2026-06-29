@@ -15,8 +15,12 @@ export async function exportPublicKey(publicKey: CryptoKey): Promise<string> {
 
 /** Import a peer's base64 public key → CryptoKey. */
 export function importPublicKey(base64Key: string): Promise<CryptoKey> {
-	const raw = Uint8Array.from(atob(base64Key), (c) => c.charCodeAt(0));
-	return crypto.subtle.importKey('raw', raw, ECDH_PARAMS, true, []);
+	const bin = atob(base64Key);
+	const raw = new Uint8Array(bin.length);
+	for (let i = 0; i < bin.length; i++) {
+		raw[i] = bin.charCodeAt(i);
+	}
+	return crypto.subtle.importKey('raw', raw.buffer, ECDH_PARAMS, true, []);
 }
 
 /** Derive 256-bit shared secret from our private key + peer's public key. */
