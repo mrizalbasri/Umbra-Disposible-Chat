@@ -17,13 +17,40 @@ type MatchStorage struct {
 
 // MatchQueue — POST /v1/api/match/queue
 func MatchQueue(c *fiber.Ctx) error {
-	queueID := uuid.New().String()
+    matchStore.mu.Lock()
+    defer matchStore.mu.Unlock()
 
-	matchStore.mu.Lock()
-	matchStore.queues[queueID] = "waiting"
-	matchStore.mu.Unlock()
+    // 1. Cari apakah ada user lain yang statusnya "waiting"
+    var peerQueueID string
+    for id, status := range matchStore.queues {
+        if status == "waiting" {
+            peerQueueID = id
+            break
+        }
+    }
 
-	return ok(c, fiber.Map{"status": "waiting", "queueId": queueID})
+    // 2. Jika ada user lain yang siap dipasangkan
+    if peerQueueID != "" {
+        // Ubah status antrean lama menjadi matched (atau langsung hapus)
+        delete(matchStore.queues, peerQueueID)
+        
+        // Buat Room ID baru untuk mereka berdua
+        roomID := uuid.New().String()
+        
+        // (Opsional) Di sini nanti kamu panggil fungsi dari roomhandler untuk mendaftarkan roomID ini
+
+        return ok(c, fiber.Map{
+            "status":  "matched",
+            "roomId":  roomID,
+            "peerId":  peerQueueID,
+        })
+    }
+
+    // 3. Jika tidak ada orang lain di antrean, masukkan user ini ke daftar "waiting"
+    queueID := uuid.New().String()
+    matchStore.queues[queueID] = "waiting"
+
+    return ok(c, fiber.Map{"status": "waiting", "queueId": queueID})
 }
 
 // CancelQueue — DELETE /v1/api/match/queue/:queueId
