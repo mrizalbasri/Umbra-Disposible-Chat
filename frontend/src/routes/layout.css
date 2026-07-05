@@ -1,2 +1,116 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
+
+@theme {
+	/* Colors */
+	--color-outline-variant: #bdc8d1;
+	--color-surface-container-high: #dbe9fe;
+	--color-primary-fixed: #c6e7ff;
+	--color-inverse-on-surface: #e9f1ff;
+	--color-primary-container: #00aeef;
+	--color-tertiary-fixed: #6ffbbe;
+	--color-inverse-surface: #243141;
+	--color-on-surface-variant: #3e4850;
+	--color-background: #f8f9ff;
+	--color-error-container: #ffdad6;
+	--color-outline: #6e7881;
+	--color-on-tertiary: #ffffff;
+	--color-inverse-primary: #82cfff;
+	--color-secondary-fixed: #cee6f9;
+	--color-on-primary-fixed-variant: #004c6b;
+	--color-on-secondary-container: #516777;
+	--color-secondary-container: #cee6f9;
+	--color-on-tertiary-container: #00422b;
+	--color-surface-bright: #f8f9ff;
+	--color-on-secondary: #ffffff;
+	--color-tertiary-container: #10b981;
+	--color-primary: #00658d;
+	--color-surface-variant: #d6e4f9;
+	--color-on-primary-fixed: #001e2d;
+	--color-on-error: #ffffff;
+	--color-on-surface: #0f1c2c;
+	--color-surface-container-highest: #d6e4f9;
+	--color-on-tertiary-fixed: #002113;
+	--color-tertiary: #006c49;
+	--color-primary-fixed-dim: #82cfff;
+	--color-surface-container-lowest: #ffffff;
+	--color-on-secondary-fixed-variant: #334959;
+	--color-secondary-fixed-dim: #b2c9dc;
+	--color-on-primary: #ffffff;
+	--color-on-tertiary-fixed-variant: #005236;
+	--color-on-error-container: #93000a;
+	--color-tertiary-fixed-dim: #4edea3;
+	--color-on-background: #0f1c2c;
+	--color-secondary: #4b6171;
+	--color-on-primary-container: #003e58;
+	--color-on-secondary-fixed: #051e2c;
+	--color-surface-container-low: #eef4ff;
+	--color-error: #ba1a1a;
+	--color-surface-tint: #00658d;
+	--color-surface: #f8f9ff;
+	--color-surface-dim: #cddbf0;
+	--color-surface-container: #e5efff;
+
+	/* Spacing */
+	--spacing-stack-md: 24px;
+	--spacing-base: 8px;
+	--spacing-stack-sm: 12px;
+	--spacing-gutter: 24px;
+	--spacing-container-max: 1440px;
+	--spacing-section-gap: 80px;
+	--spacing-margin-desktop: 64px;
+
+	/* Fonts */
+	--font-headline-md: 'Space Grotesk', sans-serif;
+	--font-display-hero: 'Space Grotesk', sans-serif;
+	--font-body-md: 'Inter', sans-serif;
+	--font-label-mono: 'JetBrains Mono', monospace;
+
+	/* Font Sizes */
+	--font-size-headline-md: 24px;
+	--font-size-body-md: 16px;
+	--font-size-label-mono: 14px;
+}
+
+html,
+body {
+	background-color: var(--color-background);
+	color: var(--color-on-surface);
+	margin: 0;
+	padding: 0;
+	height: 100%;
+}
+
+/* Custom layout classes and style rules from HTML */
+.material-symbols-outlined {
+	font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+.chat-scroll::-webkit-scrollbar {
+	width: 6px;
+}
+.chat-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+.chat-scroll::-webkit-scrollbar-thumb {
+	background: #e2e8f0;
+	border-radius: 10px;
+}
+.pulse-green {
+	animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes pulse-ring {
+	0%, 100% { opacity: 1; }
+	50% { opacity: .5; }
+}
+.bubble-self {
+	border-bottom-right-radius: 4px !important;
+}
+.bubble-partner {
+	border-bottom-left-radius: 4px !important;
+}
+.shadow-premium {
+	box-shadow: 0 4px 16px rgba(0, 174, 239, 0.15);
+}
+.sidebar-transition {
+	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
