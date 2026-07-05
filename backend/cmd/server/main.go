@@ -34,10 +34,8 @@ func main() {
 
 	api := app.Group("/v1/api")
 
-	room := api.Group("/room")
-	room.Post("/create", roomhandler.CreateRoom)
-	room.Post("/join", roomhandler.JoinRoom)
-	room.Get("/:roomId/status", roomhandler.RoomStatus)
+	roomHandler := roomhandler.NewRoomHandler()
+	roomHandler.RegisterRoutes(api)
 
 	match := api.Group("/match")
 	match.Post("/queue", roomhandler.MatchQueue)
