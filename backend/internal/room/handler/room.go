@@ -15,24 +15,31 @@ var roomStore = &RoomStorage{rooms: make(map[string]*RoomData)}
 
 type RoomStorage struct {
 	mu    sync.RWMutex
-	rooms map[string]*RoomData // key: roomCode
+	rooms map[string]*RoomData // key: roomCode (Contoh: "A8B2-9F")
+}
+
+type MemberCryptoData struct {
+	EcdhPublicKey  string `json:"ecdhPublicKey"`  // Dari ecdh.ts -> untuk kunci enkripsi
+	EcdsaPublicKey string `json:"ecdsaPublicKey"` // Dari ecdsa.ts -> untuk tanda tangan pesan
 }
 
 type RoomData struct {
 	ID        string
 	Code      string
-	Members   map[string]string // memberID -> publicKey
+	Members   map[string]MemberCryptoData // memberID -> sepasang Public Key
 	Status    string
 	CreatedAt time.Time
 }
 
 type CreateRoomRequest struct {
-	PublicKey string `json:"publicKey"`
+	EcdhPublicKey  string `json:"ecdhPublicKey"`
+	EcdsaPublicKey string `json:"ecdsaPublicKey"`
 }
 
 type JoinRoomRequest struct {
-	RoomCode  string `json:"roomCode"`
-	PublicKey string `json:"publicKey"`
+	RoomCode       string `json:"roomCode"`
+	EcdhPublicKey  string `json:"ecdhPublicKey"`
+	EcdsaPublicKey string `json:"ecdsaPublicKey"`
 }
 
 func ok(c *fiber.Ctx, data interface{}) error {
@@ -46,8 +53,8 @@ func fail(c *fiber.Ctx, status int, code, msg string) error {
 // CreateRoom — POST /v1/api/room/create
 func CreateRoom(c *fiber.Ctx) error {
 	var req CreateRoomRequest
-	if err := c.BodyParser(&req); err != nil || req.PublicKey == "" {
-		return fail(c, 400, "12", "publicKey tidak boleh kosong")
+	if err := c.BodyParser(&req); err != nil || req.EcdhPublicKey == "" || req.EcdsaPublicKey == "" {
+		return fail(c, 400, "12", "ecdhPublicKey dan ecdsaPublicKey tidak boleh kosong")
 	}
 
 	roomID := uuid.New().String()
@@ -55,9 +62,14 @@ func CreateRoom(c *fiber.Ctx) error {
 	code := roomCode()
 
 	room := &RoomData{
-		ID:        roomID,
-		Code:      code,
-		Members:   map[string]string{memberID: req.PublicKey},
+		ID:   roomID,
+		Code: code,
+		Members: map[string]MemberCryptoData{
+			memberID: {
+				EcdhPublicKey:  req.EcdhPublicKey,
+				EcdsaPublicKey: req.EcdsaPublicKey,
+			},
+		},
 		Status:    "waiting",
 		CreatedAt: time.Now(),
 	}
@@ -77,8 +89,8 @@ func CreateRoom(c *fiber.Ctx) error {
 // JoinRoom — POST /v1/api/room/join
 func JoinRoom(c *fiber.Ctx) error {
 	var req JoinRoomRequest
-	if err := c.BodyParser(&req); err != nil || req.RoomCode == "" || req.PublicKey == "" {
-		return fail(c, 400, "12", "roomCode dan publicKey tidak boleh kosong")
+	if err := c.BodyParser(&req); err != nil || req.RoomCode == "" || req.EcdhPublicKey == "" || req.EcdsaPublicKey == "" {
+		return fail(c, 400, "12", "roomCode, ecdhPublicKey, dan ecdsaPublicKey tidak boleh kosong")
 	}
 
 	roomStore.mu.Lock()
@@ -92,21 +104,25 @@ func JoinRoom(c *fiber.Ctx) error {
 		return fail(c, 409, "14", "Room sudah penuh")
 	}
 
-	// grab creator's public key for ECDH exchange
-	var peerPublicKey string
-	for _, pk := range room.Members {
-		peerPublicKey = pk
+	// Ambil kunci publik milik pembuat room (User 1) untuk dilempar ke pendaftar baru (User 2)
+	var peerCrypto MemberCryptoData
+	for _, cryptoData := range room.Members {
+		peerCrypto = cryptoData
 		break
 	}
 
 	memberID := uuid.New().String()
-	room.Members[memberID] = req.PublicKey
+	room.Members[memberID] = MemberCryptoData{
+		EcdhPublicKey:  req.EcdhPublicKey,
+		EcdsaPublicKey: req.EcdsaPublicKey,
+	}
 	room.Status = "active"
 
 	return ok(c, fiber.Map{
 		"roomId":        room.ID,
 		"memberId":      memberID,
-		"peerPublicKey": peerPublicKey,
+		"peerPublicKey": peerCrypto.EcdhPublicKey,  // Kunci ECDH lawan untuk enkripsi
+		"peerSignKey":   peerCrypto.EcdsaPublicKey, // Kunci ECDSA lawan untuk verifikasi tanda tangan
 		"status":        "active",
 	})
 }
@@ -140,3 +156,4 @@ func roomCode() string {
 	}
 	return string(b[:4]) + "-" + string(b[4:])
 }
+
