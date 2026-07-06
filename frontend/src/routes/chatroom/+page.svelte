@@ -19,8 +19,8 @@
 	const BASE_URL = 'http://localhost:8080/v1/api';
 	const WS_BASE_URL = 'ws://localhost:8080/ws';
 
-	// roomState: set to 'chat' by default to render the mockup chatroom directly
-	let roomState = $state<'setup' | 'waiting' | 'chat'>('chat');
+	// roomState: set to 'setup' by default to render the real flow
+	let roomState = $state<'setup' | 'waiting' | 'chat'>('setup');
 	let activeTab = $state<'create' | 'join'>('create');
 	let nicknameInput = $state('');
 	let roomCodeInput = $state('');
@@ -41,12 +41,13 @@
 	// Deriving user initials dynamically
 	let myInitials = $derived(myNickname === 'Neon_Specter' ? 'ME' : myNickname.slice(0, 2).toUpperCase());
 
-	// Cryptographic keys (mocked by default so UI renders properly)
+	// Cryptographic keys
 	let myEcdhKeyPair: CryptoKeyPair | null = null;
 	let myEcdsaKeyPair: CryptoKeyPair | null = null;
+	let myEcdsaPkBase64 = $state(''); // stores ECDSA public key in base64
 	let peerEcdhPublicKey: CryptoKey | null = null;
 	let peerEcdsaPublicKey: CryptoKey | null = null;
-	let aesKey: CryptoKey | null = $state({} as any); // mock key for UI state
+	let aesKey: CryptoKey | null = $state(null); // start with null for real E2EE
 
 	// Chat room variables
 	let chatContainer: HTMLDivElement | null = $state(null);
@@ -171,6 +172,7 @@
 	async function generateKeys() {
 		myEcdhKeyPair = await generateKeyPair();
 		myEcdsaKeyPair = await generateSigningKeyPair();
+		myEcdsaPkBase64 = await exportSigningPublicKey(myEcdsaKeyPair.publicKey);
 	}
 
 	// Connect to WebSocket and bind message handlers (deferred hook)
@@ -192,9 +194,22 @@
 				const data = JSON.parse(event.data);
 				if (data.roomId && data.roomId !== roomId) return;
 
+				if (data.event === 'error') {
+					if (data.code === 16 || data.payload?.code === 16) {
+						toastMessage = 'Security Alert: Tanda tangan pesan tidak valid (ECDSA Verify Failed)!';
+						showToast = true;
+						setTimeout(() => {
+							showToast = false;
+						}, 4000);
+					} else {
+						console.error('Backend error:', data.message || data.payload?.message);
+					}
+					return;
+				}
+
 				if (data.event === 'peer_joined') {
-					const peerPkBase64 = data.payload.publicKey;
-					peerEcdhPublicKey = await importPublicKey(peerPkBase64);
+					peerEcdhPublicKey = await importPublicKey(data.payload.ecdhPublicKey);
+					peerEcdsaPublicKey = await importSigningPublicKey(data.payload.ecdsaPublicKey);
 
 					const sharedSecret = await deriveSharedSecret(myEcdhKeyPair!.privateKey, peerEcdhPublicKey);
 					aesKey = await deriveAESKey(sharedSecret);
@@ -229,7 +244,7 @@
 					} else if (decryptedObj.type === 'chat') {
 						if (peerEcdsaPublicKey) {
 							const msgData = new TextEncoder().encode(ciphertext + iv + timestamp);
-							const isValid = await verify(msgData, signature, peerEcdsaPublicKey);
+							const isValid = await verify(msgData.buffer, signature, peerEcdsaPublicKey);
 							if (!isValid) {
 								console.error('ECDSA signature verification failed! Message untrusted.');
 								return;
@@ -284,7 +299,6 @@
 	async function sendHandshake() {
 		if (!aesKey || !myEcdsaKeyPair) return;
 
-		const myEcdsaPkBase64 = await exportSigningPublicKey(myEcdsaKeyPair.publicKey);
 		const payload = {
 			type: 'handshake',
 			signingPublicKey: myEcdsaPkBase64,
@@ -296,7 +310,7 @@
 		const timestamp = new Date().toISOString();
 
 		const dataToSign = new TextEncoder().encode(ciphertext + iv + timestamp);
-		const signature = await sign(dataToSign, myEcdsaKeyPair.privateKey);
+		const signature = await sign(dataToSign.buffer, myEcdsaKeyPair.privateKey);
 
 		const msg = {
 			event: 'send_message',
@@ -306,7 +320,8 @@
 				ciphertext,
 				iv,
 				signature,
-				timestamp
+				timestamp,
+				publicKey: myEcdsaPkBase64
 			}
 		};
 
@@ -328,7 +343,7 @@
 			const res = await fetch(`${BASE_URL}/room/create`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ publicKey: myEcdhPkBase64 })
+				body: JSON.stringify({ ecdhPublicKey: myEcdhPkBase64, ecdsaPublicKey: myEcdsaPkBase64 })
 			});
 
 			const result = await res.json();
@@ -380,7 +395,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					roomCode: roomCodeInput.trim(),
-					publicKey: myEcdhPkBase64
+					ecdhPublicKey: myEcdhPkBase64,
+					ecdsaPublicKey: myEcdsaPkBase64
 				})
 			});
 
@@ -394,8 +410,9 @@
 			roomId = result.data.roomId;
 			memberId = result.data.memberId;
 
-			const peerPkBase64 = result.data.peerPublicKey;
-			peerEcdhPublicKey = await importPublicKey(peerPkBase64);
+			// Kunci ECDH peer untuk enkripsi + kunci ECDSA peer untuk verifikasi tanda tangan
+			peerEcdhPublicKey = await importPublicKey(result.data.peerPublicKey);
+			peerEcdsaPublicKey = await importSigningPublicKey(result.data.peerSignKey);
 
 			const sharedSecret = await deriveSharedSecret(myEcdhKeyPair!.privateKey, peerEcdhPublicKey);
 			aesKey = await deriveAESKey(sharedSecret);
@@ -449,7 +466,7 @@
 				const timestamp = new Date().toISOString();
 
 				const dataToSign = new TextEncoder().encode(ciphertext + iv + timestamp);
-				const signature = await sign(dataToSign, myEcdsaKeyPair.privateKey);
+				const signature = await sign(dataToSign.buffer, myEcdsaKeyPair.privateKey);
 
 				const msg = {
 					event: 'send_message',
@@ -459,7 +476,8 @@
 						ciphertext,
 						iv,
 						signature,
-						timestamp
+						timestamp,
+						publicKey: myEcdsaPkBase64
 					}
 				};
 

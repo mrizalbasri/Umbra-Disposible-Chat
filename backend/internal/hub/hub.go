@@ -4,15 +4,26 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+	"umbra-backend/internal/crypto"
 
 	"github.com/gofiber/websocket/v2"
 )
 
-// WSMessage digunakan untuk membaca roomId tujuan dari payload json frontend
+// WSPayload mewakili isi payload pesan dengan tanda tangan digital
+type WSPayload struct {
+	Ciphertext string `json:"ciphertext"`
+	IV         string `json:"iv"`
+	Signature  string `json:"signature"`
+	Timestamp  string `json:"timestamp"`
+	PublicKey  string `json:"publicKey"` // ECDSA public key base64 dari frontend
+}
+
+// WSMessage digunakan untuk membaca roomId tujuan dan detail payload json frontend
 type WSMessage struct {
-	RoomID   string `json:"roomId"`
-	SenderID string `json:"senderId"`
-	Payload  string `json:"payload"`
+	Event          string    `json:"event"`
+	RoomID         string    `json:"roomId"`
+	SenderMemberID string    `json:"senderMemberId"`
+	Payload        WSPayload `json:"payload"`
 }
 
 // Hub mengelola koneksi WebSocket aktif berdasarkan ruangan (Room)
@@ -90,6 +101,31 @@ func (h *Hub) HandleWS(c *websocket.Conn) {
 		if err != nil {
 			break // client disconnected
 		}
+
+		// 1. Parse JSON pesan untuk memverifikasi tanda tangan
+		var wsMsg WSMessage
+		if err := json.Unmarshal(msg, &wsMsg); err == nil && wsMsg.Event == "send_message" {
+			// Gabungkan data sesuai dengan yang di-sign di frontend (ciphertext + iv + timestamp)
+			dataToVerify := []byte(wsMsg.Payload.Ciphertext + wsMsg.Payload.IV + wsMsg.Payload.Timestamp)
+
+			// Panggil verifikasi
+			valid, err := crypto.VerifySignature(dataToVerify, wsMsg.Payload.Signature, wsMsg.Payload.PublicKey)
+			if err != nil || !valid {
+				log.Printf("🚨 ECDSA Verification failed for member %s: %v", wsMsg.SenderMemberID, err)
+
+				// Kirim balik respon error code 16 ke client pengirim
+				errResp := map[string]interface{}{
+					"event":   "error",
+					"code":    16,
+					"message": "Security Alert: Tanda tangan pesan tidak valid (ECDSA Verify Failed)!",
+				}
+				errBytes, _ := json.Marshal(errResp)
+				_ = c.WriteMessage(websocket.TextMessage, errBytes)
+
+				continue // Lewati broadcast agar pesan tidak terkirim ke member lain
+			}
+		}
+
 		h.broadcast <- msg
 	}
 }
