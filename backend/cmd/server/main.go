@@ -9,8 +9,8 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/websocket/v2"
 
-	roomhandler "umbra-backend/internal/room/handler"
 	"umbra-backend/internal/hub"
+	roomhandler "umbra-backend/internal/room/handler"
 )
 
 func main() {
@@ -32,14 +32,12 @@ func main() {
 		return c.JSON(fiber.Map{"status": "ok", "app": "Umbra", "version": "1.0.0"})
 	})
 
+	// Base group /v1/api sesuai kontrak
 	api := app.Group("/v1/api")
 
+	// roomHandler sekarang otomatis menghandle sub-grup /room DAN /match
 	roomHandler := roomhandler.NewRoomHandler()
 	roomHandler.RegisterRoutes(api)
-
-	match := api.Group("/match")
-	match.Post("/queue", roomhandler.MatchQueue)
-	match.Delete("/queue/:queueId", roomhandler.CancelQueue)
 
 	// WebSocket upgrade guard
 	app.Use("/ws", func(c *fiber.Ctx) error {
