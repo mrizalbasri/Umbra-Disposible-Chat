@@ -146,6 +146,19 @@ func RoomStatus(c *fiber.Ctx) error {
 	return fail(c, 404, "11", "Room tidak ditemukan")
 }
 
+// DeleteRoom menghapus ruangan dari roomStore berdasarkan roomID (untuk mencegah memory leak)
+func DeleteRoom(roomID string) {
+	roomStore.mu.Lock()
+	defer roomStore.mu.Unlock()
+
+	for code, room := range roomStore.rooms {
+		if room.ID == roomID {
+			delete(roomStore.rooms, code)
+			break
+		}
+	}
+}
+
 // roomCode generates a XXXX-XX code using crypto/rand (not time-based)
 func roomCode() string {
 	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"

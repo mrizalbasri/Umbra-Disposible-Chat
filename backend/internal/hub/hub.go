@@ -5,6 +5,7 @@ import (
 	"log"
 	"sync"
 	"umbra-backend/internal/crypto"
+	roomhandler "umbra-backend/internal/room/handler"
 
 	"github.com/gofiber/websocket/v2"
 )
@@ -26,17 +27,25 @@ type WSMessage struct {
 	Payload        WSPayload `json:"payload"`
 }
 
+// Client menyimpan detail koneksi dan kunci publik untuk E2EE
+type Client struct {
+	Conn           *websocket.Conn
+	MemberID       string
+	EcdhPublicKey  string
+	EcdsaPublicKey string
+}
+
 // Hub mengelola koneksi WebSocket aktif berdasarkan ruangan (Room)
 type Hub struct {
 	mu        sync.RWMutex
-	// Memetakan RoomID -> Daftar koneksi websocket aktif di dalam room tersebut
-	rooms     map[string]map[*websocket.Conn]struct{}
+	// Memetakan RoomID -> Daftar client aktif di dalam room tersebut
+	rooms     map[string]map[*websocket.Conn]*Client
 	broadcast chan []byte
 }
 
 func New() *Hub {
 	return &Hub{
-		rooms:     make(map[string]map[*websocket.Conn]struct{}),
+		rooms:     make(map[string]map[*websocket.Conn]*Client),
 		broadcast: make(chan []byte, 256),
 	}
 }
@@ -64,7 +73,7 @@ func (h *Hub) Run() {
 }
 
 func (h *Hub) HandleWS(c *websocket.Conn) {
-	// Ambil roomId dari query parameter URL koneksi (Contoh: ws://localhost:8080/ws?roomId=ABC)
+	// Ambil metadata dari query parameter URL koneksi
 	roomID := c.Query("roomId")
 	if roomID == "" {
 		c.WriteMessage(websocket.TextMessage, []byte(`{"error": "roomId wajib diisi"}`))
@@ -72,23 +81,82 @@ func (h *Hub) HandleWS(c *websocket.Conn) {
 		return
 	}
 
+	memberID := c.Query("memberId")
+	ecdhPublicKey := c.Query("ecdhPublicKey")
+	ecdsaPublicKey := c.Query("ecdsaPublicKey")
+
+	client := &Client{
+		Conn:           c,
+		MemberID:       memberID,
+		EcdhPublicKey:  ecdhPublicKey,
+		EcdsaPublicKey: ecdsaPublicKey,
+	}
+
 	h.mu.Lock()
 	// Jika ruangan belum terdaftar di memori RAM, buat map baru untuk ruangan tersebut
 	if h.rooms[roomID] == nil {
-		h.rooms[roomID] = make(map[*websocket.Conn]struct{})
+		h.rooms[roomID] = make(map[*websocket.Conn]*Client)
 	}
-	h.rooms[roomID][c] = struct{}{}
+	h.rooms[roomID][c] = client
+
+	// Jika ada client lain di room ini, kirim info peer_joined secara timbal balik
+	if len(h.rooms[roomID]) > 1 && memberID != "" {
+		for otherConn, otherClient := range h.rooms[roomID] {
+			if otherConn != c {
+				// 1. Kirim data client baru ke client lama
+				peerJoinedEvent := map[string]interface{}{
+					"event":  "peer_joined",
+					"roomId": roomID,
+					"payload": map[string]string{
+						"memberId":       memberID,
+						"ecdhPublicKey":  ecdhPublicKey,
+						"ecdsaPublicKey": ecdsaPublicKey,
+					},
+				}
+				eventBytes, _ := json.Marshal(peerJoinedEvent)
+				_ = otherConn.WriteMessage(websocket.TextMessage, eventBytes)
+
+				// 2. Kirim data client lama ke client baru
+				peerJoinedEventSelf := map[string]interface{}{
+					"event":  "peer_joined",
+					"roomId": roomID,
+					"payload": map[string]string{
+						"memberId":       otherClient.MemberID,
+						"ecdhPublicKey":  otherClient.EcdhPublicKey,
+						"ecdsaPublicKey": otherClient.EcdsaPublicKey,
+					},
+				}
+				eventBytesSelf, _ := json.Marshal(peerJoinedEventSelf)
+				_ = c.WriteMessage(websocket.TextMessage, eventBytesSelf)
+			}
+		}
+	}
 	h.mu.Unlock()
 
-	log.Printf("👥 Koneksi baru masuk ke Room: %s", roomID)
+	log.Printf("👥 Koneksi baru masuk ke Room: %s (Member: %s)", roomID, memberID)
 
 	defer func() {
 		h.mu.Lock()
 		if conns, exists := h.rooms[roomID]; exists {
 			delete(conns, c)
-			// Jika ruangan sudah kosong melompong, hapus sekalian dari memori biar hemat RAM
-			if len(conns) == 0 {
+			
+			// Jika masih ada sisa client di room, kirim event peer_left ke mereka
+			if len(conns) > 0 {
+				peerLeftEvent := map[string]interface{}{
+					"event":  "peer_left",
+					"roomId": roomID,
+					"payload": map[string]string{
+						"memberId": memberID,
+					},
+				}
+				eventBytes, _ := json.Marshal(peerLeftEvent)
+				for otherConn := range conns {
+					_ = otherConn.WriteMessage(websocket.TextMessage, eventBytes)
+				}
+			} else {
+				// Jika ruangan sudah kosong melompong, hapus sekalian dari memori biar hemat RAM
 				delete(h.rooms, roomID)
+				roomhandler.DeleteRoom(roomID)
 			}
 		}
 		h.mu.Unlock()
@@ -123,6 +191,12 @@ func (h *Hub) HandleWS(c *websocket.Conn) {
 				_ = c.WriteMessage(websocket.TextMessage, errBytes)
 
 				continue // Lewati broadcast agar pesan tidak terkirim ke member lain
+			}
+
+			// Ubah event ke "message" agar bisa dikenali oleh frontend penerima
+			wsMsg.Event = "message"
+			if marshaledMsg, err := json.Marshal(wsMsg); err == nil {
+				msg = marshaledMsg
 			}
 		}
 
