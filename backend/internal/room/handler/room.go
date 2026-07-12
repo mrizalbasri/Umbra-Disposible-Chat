@@ -19,42 +19,81 @@ type RoomStorage struct {
 }
 
 type MemberCryptoData struct {
-	EcdhPublicKey  string `json:"ecdhPublicKey"`  // Dari ecdh.ts -> untuk kunci enkripsi
-	EcdsaPublicKey string `json:"ecdsaPublicKey"` // Dari ecdsa.ts -> untuk tanda tangan pesan
+	PublicKey string `json:"publicKey"` // Sesuai API Contract: Single string base64 ECDH
+	Nickname  string `json:"nickname"`  // Sesuai API Contract: Penampung display name opsional
 }
 
 type RoomData struct {
 	ID        string
 	Code      string
-	Members   map[string]MemberCryptoData // memberID -> sepasang Public Key
+	Members   map[string]MemberCryptoData // memberID -> sepasang Public Key & Nickname
 	Status    string
 	CreatedAt time.Time
 }
 
 type CreateRoomRequest struct {
-	EcdhPublicKey  string `json:"ecdhPublicKey"`
-	EcdsaPublicKey string `json:"ecdsaPublicKey"`
+	PublicKey string `json:"publicKey"` // Sesuai API Contract Halaman 5
+	Nickname  string `json:"nickname"`  // Sesuai API Contract Halaman 5
 }
 
 type JoinRoomRequest struct {
-	RoomCode       string `json:"roomCode"`
-	EcdhPublicKey  string `json:"ecdhPublicKey"`
-	EcdsaPublicKey string `json:"ecdsaPublicKey"`
+	RoomCode  string `json:"roomCode"`  // Sesuai API Contract Halaman 7
+	PublicKey string `json:"publicKey"` // Sesuai API Contract Halaman 7
+	Nickname  string `json:"nickname"`  // Sesuai API Contract Halaman 7
 }
 
-func ok(c *fiber.Ctx, data interface{}) error {
-	return c.JSON(fiber.Map{"responseCode": "00", "responseMessage": "Berhasil", "data": data})
+// --- STRUCT RESPON KHUSUS UNTUK MEMAKSA URUTAN KAKU JSON (STRICT SORTING) ---
+
+type CreateRoomResponseData struct {
+	RoomCode string `json:"roomCode"`
+	RoomID   string `json:"roomId"`
+	Status   string `json:"status"`
 }
 
+type CreateRoomStandardResponse struct {
+	ResponseMessage string                 `json:"responseMessage"`
+	ResponseCode    string                 `json:"responseCode"`
+	Data            CreateRoomResponseData `json:"data"`
+}
+
+type JoinRoomResponseData struct {
+	RoomID        string `json:"roomId"`
+	PeerPublicKey string `json:"peerPublicKey"`
+	Status        string `json:"status"`
+}
+
+type JoinRoomStandardResponse struct {
+	ResponseMessage string               `json:"responseMessage"`
+	ResponseCode    string               `json:"responseCode"`
+	Data            JoinRoomResponseData `json:"data"`
+}
+
+type RoomStatusResponseData struct {
+	RoomID      string `json:"roomId"`
+	MemberCount int    `json:"memberCount"`
+	Status      string `json:"status"`
+}
+
+type RoomStatusStandardResponse struct {
+	ResponseMessage string                 `json:"responseMessage"`
+	ResponseCode    string                 `json:"responseCode"`
+	Data            RoomStatusResponseData `json:"data"`
+}
+
+// fail formatter — disesuaikan agar format output JSON seragam sesuai spesifikasi aplikasi
 func fail(c *fiber.Ctx, status int, code, msg string) error {
-	return c.Status(status).JSON(fiber.Map{"responseCode": code, "responseMessage": msg, "data": nil})
+	return c.Status(status).JSON(fiber.Map{
+		"responseMessage": msg,
+		"responseCode":    code,
+		"data":            nil,
+	})
 }
 
 // CreateRoom — POST /v1/api/room/create
 func CreateRoom(c *fiber.Ctx) error {
 	var req CreateRoomRequest
-	if err := c.BodyParser(&req); err != nil || req.EcdhPublicKey == "" || req.EcdsaPublicKey == "" {
-		return fail(c, 400, "12", "ecdhPublicKey dan ecdsaPublicKey tidak boleh kosong")
+	if err := c.BodyParser(&req); err != nil || req.PublicKey == "" {
+		return fail(c, 400, "12", "publicKey tidak boleh kosong") // Sesuai Error Code 12
 	}
 
 	roomID := uuid.New().String()
@@ -66,11 +105,11 @@ func CreateRoom(c *fiber.Ctx) error {
 		Code: code,
 		Members: map[string]MemberCryptoData{
 			memberID: {
-				EcdhPublicKey:  req.EcdhPublicKey,
-				EcdsaPublicKey: req.EcdsaPublicKey,
+				PublicKey: req.PublicKey,
+				Nickname:  req.Nickname,
 			},
 		},
-		Status:    "waiting",
+		Status:    "waiting", // Status awal: waiting
 		CreatedAt: time.Now(),
 	}
 
@@ -78,19 +117,23 @@ func CreateRoom(c *fiber.Ctx) error {
 	roomStore.rooms[code] = room
 	roomStore.mu.Unlock()
 
-	return ok(c, fiber.Map{
-		"roomCode": code,
-		"roomId":   roomID,
-		"memberId": memberID,
-		"status":   "waiting",
+	// Memaksa cetakan JSON urut rapi dari atas ke bawah (Halaman 6 dokumen kontrak)
+	return c.JSON(CreateRoomStandardResponse{
+		ResponseMessage: "Room berhasil dibuat.",
+		ResponseCode:    "00",
+		Data: CreateRoomResponseData{
+			RoomCode: code,
+			RoomID:   roomID,
+			Status:   "waiting",
+		},
 	})
 }
 
 // JoinRoom — POST /v1/api/room/join
 func JoinRoom(c *fiber.Ctx) error {
 	var req JoinRoomRequest
-	if err := c.BodyParser(&req); err != nil || req.RoomCode == "" || req.EcdhPublicKey == "" || req.EcdsaPublicKey == "" {
-		return fail(c, 400, "12", "roomCode, ecdhPublicKey, dan ecdsaPublicKey tidak boleh kosong")
+	if err := c.BodyParser(&req); err != nil || req.RoomCode == "" || req.PublicKey == "" {
+		return fail(c, 400, "12", "roomCode/publicKey tidak boleh kosong") // Sesuai Error Code 12
 	}
 
 	roomStore.mu.Lock()
@@ -98,32 +141,35 @@ func JoinRoom(c *fiber.Ctx) error {
 
 	room, exists := roomStore.rooms[req.RoomCode]
 	if !exists {
-		return fail(c, 404, "11", "Room tidak ditemukan")
+		return fail(c, 404, "11", "Room tidak ditemukan") // Sesuai Error Code 11
 	}
 	if len(room.Members) >= 2 {
-		return fail(c, 409, "14", "Room sudah penuh")
+		return fail(c, 409, "14", "Room sudah penuh (maksimal 2 anggota)") // Sesuai Error Code 14
 	}
 
-	// Ambil kunci publik milik pembuat room (User 1) untuk dilempar ke pendaftar baru (User 2)
-	var peerCrypto MemberCryptoData
+	// Ambil data publicKey milik user pertama (peer) untuk proses key exchange
+	var peerPublicKey string
 	for _, cryptoData := range room.Members {
-		peerCrypto = cryptoData
+		peerPublicKey = cryptoData.PublicKey
 		break
 	}
 
 	memberID := uuid.New().String()
 	room.Members[memberID] = MemberCryptoData{
-		EcdhPublicKey:  req.EcdhPublicKey,
-		EcdsaPublicKey: req.EcdsaPublicKey,
+		PublicKey: req.PublicKey,
+		Nickname:  req.Nickname,
 	}
-	room.Status = "active"
+	room.Status = "active" // Status berubah menjadi active
 
-	return ok(c, fiber.Map{
-		"roomId":        room.ID,
-		"memberId":      memberID,
-		"peerPublicKey": peerCrypto.EcdhPublicKey,  // Kunci ECDH lawan untuk enkripsi
-		"peerSignKey":   peerCrypto.EcdsaPublicKey, // Kunci ECDSA lawan untuk verifikasi tanda tangan
-		"status":        "active",
+	// Memaksa cetakan JSON urut rapi dari atas ke bawah (Halaman 8 dokumen kontrak)
+	return c.JSON(JoinRoomStandardResponse{
+		ResponseMessage: "Berhasil bergabung ke room.",
+		ResponseCode:    "00",
+		Data: JoinRoomResponseData{
+			RoomID:        room.ID,
+			PeerPublicKey: peerPublicKey,
+			Status:        "active",
+		},
 	})
 }
 
@@ -136,24 +182,30 @@ func RoomStatus(c *fiber.Ctx) error {
 
 	for _, room := range roomStore.rooms {
 		if room.ID == roomID {
-			return ok(c, fiber.Map{
-				"roomId":      room.ID,
-				"memberCount": len(room.Members),
-				"status":      room.Status,
+			// Memaksa cetakan JSON urut rapi dari atas ke bawah (Halaman 10 dokumen kontrak)
+			return c.JSON(RoomStatusStandardResponse{
+				ResponseMessage: "Data room ditemukan.",
+				ResponseCode:    "00",
+				Data: RoomStatusResponseData{
+					RoomID:      room.ID,
+					MemberCount: len(room.Members),
+					Status:      room.Status,
+				},
 			})
 		}
 	}
-	return fail(c, 404, "11", "Room tidak ditemukan")
+	
+	// DIUBAH DI SINI: Disamakan persis dengan "Penjelasan Response" pada dokumen contract halaman 10
+	return fail(c, 404, "11", "Room tidak ditemukan atau sudah dihapus dari memori server") // Sesuai Error Code 11
 }
 
 // roomCode generates a XXXX-XX code using crypto/rand (not time-based)
 func roomCode() string {
 	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	b := make([]byte, 6)
-	rand.Read(b) // ponytail: ignoring error — rand.Read on crypto/rand never fails on modern OS
+	_, _ = rand.Read(b) // ponytail: ignoring error — rand.Read on crypto/rand never fails on modern OS
 	for i, v := range b {
 		b[i] = chars[int(v)%len(chars)]
 	}
 	return string(b[:4]) + "-" + string(b[4:])
 }
-
