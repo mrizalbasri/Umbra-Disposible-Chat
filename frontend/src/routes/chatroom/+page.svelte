@@ -124,6 +124,12 @@
 				timeLeft -= 1;
 			} else {
 				clearInterval(timerInterval);
+				toastMessage = 'Sesi obrolan telah berakhir (Waktu TTL Habis)!';
+				showToast = true;
+				setTimeout(() => {
+					showToast = false;
+				}, 4000);
+				leaveRoom();
 			}
 		}, 1000);
 	}
@@ -177,12 +183,11 @@
 
 	// Connect to WebSocket and bind message handlers (deferred hook)
 	function connectWebSocket(myEcdhPkBase64: string) {
-		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&publicKey=${encodeURIComponent(myEcdhPkBase64)}`;
+		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&memberId=${memberId}&ecdhPublicKey=${encodeURIComponent(myEcdhPkBase64)}&ecdsaPublicKey=${encodeURIComponent(myEcdsaPkBase64)}`;
 		socket = new WebSocket(wsUrl);
 
 		socket.onopen = () => {
 			isConnected = true;
-			startTimer();
 
 			if (aesKey) {
 				sendHandshake();
@@ -215,11 +220,13 @@
 					aesKey = await deriveAESKey(sharedSecret);
 
 					roomState = 'chat';
+					startTimer();
 					await tick();
 					scrollToBottom();
 
 					await sendHandshake();
 				} else if (data.event === 'message') {
+					if (data.senderMemberId === memberId) return;
 					const { ciphertext, iv, signature, timestamp } = data.payload;
 
 					if (!aesKey) return;
@@ -427,6 +434,7 @@
 			];
 
 			roomState = 'chat';
+			startTimer();
 			connectWebSocket(myEcdhPkBase64);
 		} catch (err: any) {
 			errorMessage = err.message || 'Network error, please start/check the backend server.';
@@ -540,7 +548,11 @@
 
 	// Initialize scroll and timer on load
 	onMount(() => {
-		startTimer();
+		const params = new URLSearchParams(window.location.search);
+		const tab = params.get('tab');
+		if (tab === 'create' || tab === 'join') {
+			activeTab = tab;
+		}
 		scrollToBottom();
 	});
 </script>
