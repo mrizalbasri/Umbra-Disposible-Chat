@@ -7,20 +7,21 @@ export function generateKeyPair(): Promise<CryptoKeyPair> {
 	return crypto.subtle.generateKey(ECDH_PARAMS, true, ['deriveKey', 'deriveBits']);
 }
 
-/** Export public key → base64 for sending to server/peer. */
+/** Export public key → base64 (spki format) for sending to server/peer. */
 export async function exportPublicKey(publicKey: CryptoKey): Promise<string> {
-	const raw = await crypto.subtle.exportKey('raw', publicKey);
-	return btoa(Array.from(new Uint8Array(raw), (b) => String.fromCharCode(b)).join(''));
+	const spki = await crypto.subtle.exportKey('spki', publicKey);
+	return btoa(Array.from(new Uint8Array(spki), (b) => String.fromCharCode(b)).join(''));
 }
 
-/** Import a peer's base64 public key → CryptoKey. */
+/** Import a peer's base64 public key → CryptoKey (supports both spki and raw formats). */
 export function importPublicKey(base64Key: string): Promise<CryptoKey> {
 	const bin = atob(base64Key);
 	const raw = new Uint8Array(bin.length);
 	for (let i = 0; i < bin.length; i++) {
 		raw[i] = bin.charCodeAt(i);
 	}
-	return crypto.subtle.importKey('raw', raw.buffer, ECDH_PARAMS, true, []);
+	const format = raw.byteLength === 65 ? 'raw' : 'spki';
+	return crypto.subtle.importKey(format, raw.buffer, ECDH_PARAMS, true, []);
 }
 
 /** Derive 256-bit shared secret from our private key + peer's public key. */

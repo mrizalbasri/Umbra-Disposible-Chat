@@ -3,6 +3,7 @@ package handler
 import (
 	"sync"
 	"time"
+	"umbra-backend/internal/crypto"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -73,6 +74,9 @@ func MatchQueue(c *fiber.Ctx) error {
 	var req MatchQueueRequest
 	if err := c.BodyParser(&req); err != nil || req.PublicKey == "" {
 		return fail(c, 400, "12", "publicKey tidak boleh kosong") // Sesuai Error Code 12 [cite: 17, 161]
+	}
+	if !crypto.ValidatePublicKey(req.PublicKey) {
+		return fail(c, 400, "15", "Format publicKey tidak valid") // Sesuai Error Code 15
 	}
 
 	matchStore.mu.Lock()

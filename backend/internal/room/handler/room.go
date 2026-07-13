@@ -2,8 +2,10 @@ package handler
 
 import (
 	"crypto/rand"
+	"regexp"
 	"sync"
 	"time"
+	"umbra-backend/internal/crypto"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -95,6 +97,9 @@ func CreateRoom(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil || req.PublicKey == "" {
 		return fail(c, 400, "12", "publicKey tidak boleh kosong") // Sesuai Error Code 12
 	}
+	if !crypto.ValidatePublicKey(req.PublicKey) {
+		return fail(c, 400, "15", "Format publicKey tidak valid") // Sesuai Error Code 15
+	}
 
 	roomID := uuid.New().String()
 	memberID := uuid.New().String()
@@ -134,6 +139,12 @@ func JoinRoom(c *fiber.Ctx) error {
 	var req JoinRoomRequest
 	if err := c.BodyParser(&req); err != nil || req.RoomCode == "" || req.PublicKey == "" {
 		return fail(c, 400, "12", "roomCode/publicKey tidak boleh kosong") // Sesuai Error Code 12
+	}
+	if matched, _ := regexp.MatchString(`^(?i)[A-Z0-9]{4}-[A-Z0-9]{2}$`, req.RoomCode); !matched {
+		return fail(c, 400, "13", "Format kode room tidak valid. Gunakan format XXXX-XX") // Sesuai Error Code 13
+	}
+	if !crypto.ValidatePublicKey(req.PublicKey) {
+		return fail(c, 400, "15", "Format publicKey tidak valid") // Sesuai Error Code 15
 	}
 
 	roomStore.mu.Lock()
