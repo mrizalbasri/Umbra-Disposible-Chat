@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import {
 		generateKeyPair,
 		exportPublicKey,
@@ -20,12 +22,13 @@
 	const WS_BASE_URL = 'ws://localhost:8080/ws';
 
 	// roomState: set to 'setup' by default to render the real flow
-	let roomState = $state<'setup' | 'waiting' | 'chat'>('setup');
-	let activeTab = $state<'create' | 'join'>('create');
+	let roomState = $state<'setup' | 'waiting' | 'match_waiting' | 'chat'>('setup');
+	let activeTab = $state<'create' | 'join' | 'match'>('create');
 	let nicknameInput = $state('');
 	let roomCodeInput = $state('');
 	let isLoading = $state(false);
 	let errorMessage = $state('');
+	let matchQueueId = $state('');
 
 	// Interactive features state
 	let showSearchInput = $state(false);
@@ -39,7 +42,9 @@
 	let memberId = $state('my-member-id');
 
 	// Deriving user initials dynamically
-	let myInitials = $derived(myNickname === 'Neon_Specter' ? 'ME' : myNickname.slice(0, 2).toUpperCase());
+	let myInitials = $derived(
+		myNickname === 'Neon_Specter' ? 'ME' : myNickname.slice(0, 2).toUpperCase()
+	);
 
 	// Cryptographic keys
 	let myEcdhKeyPair: CryptoKeyPair | null = null;
@@ -148,6 +153,32 @@
 		return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}s`;
 	}
 
+	function createClientMemberID(): string {
+		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+			return crypto.randomUUID();
+		}
+		return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	}
+
+	async function transitionToMatchedRoom(peerPublicKey: string, myEcdhPkBase64: string) {
+		peerEcdhPublicKey = await importPublicKey(peerPublicKey);
+		const sharedSecret = await deriveSharedSecret(myEcdhKeyPair!.privateKey, peerEcdhPublicKey);
+		aesKey = await deriveAESKey(sharedSecret);
+
+		messages = [
+			{
+				id: 'init-sys',
+				type: 'system',
+				text: 'Session established. Messages will self-destruct on disconnect.',
+				boxed: true
+			}
+		];
+
+		roomState = 'chat';
+		startTimer();
+		connectWebSocket(myEcdhPkBase64);
+	}
+
 	// Auto-growing input box
 	$effect(() => {
 		if (textareaElement && messageInput !== undefined) {
@@ -166,7 +197,10 @@
 	// Auto-format Room Code to XXXX-XX format
 	function handleRoomCodeInput(e: Event) {
 		const input = e.target as HTMLInputElement;
-		let val = input.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6);
+		let val = input.value
+			.replace(/[^a-zA-Z0-9]/g, '')
+			.toUpperCase()
+			.slice(0, 6);
 		if (val.length > 4) {
 			val = val.slice(0, 4) + '-' + val.slice(4);
 		}
@@ -174,16 +208,42 @@
 		input.value = val;
 	}
 
-	// Generate ECDH & ECDSA key pairs
+	// Generate ECDH & ECDSA key pairs sharing the same key material
 	async function generateKeys() {
 		myEcdhKeyPair = await generateKeyPair();
-		myEcdsaKeyPair = await generateSigningKeyPair();
+
+		// Convert ECDH private key to ECDSA private key for signing
+		const jwkPrivate = await crypto.subtle.exportKey('jwk', myEcdhKeyPair.privateKey);
+		jwkPrivate.key_ops = ['sign'];
+		const ecdsaPrivateKey = await crypto.subtle.importKey(
+			'jwk',
+			jwkPrivate,
+			{ name: 'ECDSA', namedCurve: 'P-256' },
+			true,
+			['sign']
+		);
+
+		// Convert ECDH public key to ECDSA public key for verification
+		const jwkPublic = await crypto.subtle.exportKey('jwk', myEcdhKeyPair.publicKey);
+		jwkPublic.key_ops = ['verify'];
+		const ecdsaPublicKey = await crypto.subtle.importKey(
+			'jwk',
+			jwkPublic,
+			{ name: 'ECDSA', namedCurve: 'P-256' },
+			true,
+			['verify']
+		);
+
+		myEcdsaKeyPair = {
+			privateKey: ecdsaPrivateKey,
+			publicKey: ecdsaPublicKey
+		};
 		myEcdsaPkBase64 = await exportSigningPublicKey(myEcdsaKeyPair.publicKey);
 	}
 
 	// Connect to WebSocket and bind message handlers (deferred hook)
 	function connectWebSocket(myEcdhPkBase64: string) {
-		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&memberId=${memberId}&ecdhPublicKey=${encodeURIComponent(myEcdhPkBase64)}&ecdsaPublicKey=${encodeURIComponent(myEcdsaPkBase64)}`;
+		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&publicKey=${encodeURIComponent(myEcdhPkBase64)}`;
 		socket = new WebSocket(wsUrl);
 
 		socket.onopen = () => {
@@ -213,10 +273,12 @@
 				}
 
 				if (data.event === 'peer_joined') {
-					peerEcdhPublicKey = await importPublicKey(data.payload.ecdhPublicKey);
-					peerEcdsaPublicKey = await importSigningPublicKey(data.payload.ecdsaPublicKey);
+					peerEcdhPublicKey = await importPublicKey(data.payload.publicKey);
 
-					const sharedSecret = await deriveSharedSecret(myEcdhKeyPair!.privateKey, peerEcdhPublicKey);
+					const sharedSecret = await deriveSharedSecret(
+						myEcdhKeyPair!.privateKey,
+						peerEcdhPublicKey
+					);
 					aesKey = await deriveAESKey(sharedSecret);
 
 					roomState = 'chat';
@@ -261,7 +323,10 @@
 						if (data.senderMemberId === memberId) return;
 
 						const timeObj = new Date(timestamp);
-						const timeString = timeObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+						const timeString = timeObj.toLocaleTimeString([], {
+							hour: '2-digit',
+							minute: '2-digit'
+						});
 
 						messages = [
 							...messages,
@@ -327,8 +392,7 @@
 				ciphertext,
 				iv,
 				signature,
-				timestamp,
-				publicKey: myEcdsaPkBase64
+				timestamp
 			}
 		};
 
@@ -350,7 +414,7 @@
 			const res = await fetch(`${BASE_URL}/room/create`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ ecdhPublicKey: myEcdhPkBase64, ecdsaPublicKey: myEcdsaPkBase64 })
+				body: JSON.stringify({ publicKey: myEcdhPkBase64, nickname: nicknameInput.trim() })
 			});
 
 			const result = await res.json();
@@ -361,7 +425,7 @@
 			myNickname = nicknameInput.trim();
 			roomCode = result.data.roomCode;
 			roomId = result.data.roomId;
-			memberId = result.data.memberId;
+			memberId = createClientMemberID();
 
 			messages = [
 				{
@@ -402,8 +466,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					roomCode: roomCodeInput.trim(),
-					ecdhPublicKey: myEcdhPkBase64,
-					ecdsaPublicKey: myEcdsaPkBase64
+					publicKey: myEcdhPkBase64,
+					nickname: nicknameInput.trim()
 				})
 			});
 
@@ -415,11 +479,10 @@
 			myNickname = nicknameInput.trim();
 			roomCode = roomCodeInput.trim();
 			roomId = result.data.roomId;
-			memberId = result.data.memberId;
+			memberId = createClientMemberID();
 
-			// Kunci ECDH peer untuk enkripsi + kunci ECDSA peer untuk verifikasi tanda tangan
+			// Kunci ECDH peer untuk enkripsi
 			peerEcdhPublicKey = await importPublicKey(result.data.peerPublicKey);
-			peerEcdsaPublicKey = await importSigningPublicKey(result.data.peerSignKey);
 
 			const sharedSecret = await deriveSharedSecret(myEcdhKeyPair!.privateKey, peerEcdhPublicKey);
 			aesKey = await deriveAESKey(sharedSecret);
@@ -440,6 +503,74 @@
 			errorMessage = err.message || 'Network error, please start/check the backend server.';
 		} finally {
 			isLoading = false;
+		}
+	}
+
+	// Start Random Matchmaking Queue
+	async function handleStartMatchmaking() {
+		let finalNickname = nicknameInput.trim();
+		if (!finalNickname) {
+			finalNickname = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
+		}
+		isLoading = true;
+		errorMessage = '';
+
+		try {
+			await generateKeys();
+			const myEcdhPkBase64 = await exportPublicKey(myEcdhKeyPair!.publicKey);
+			myNickname = finalNickname;
+			memberId = createClientMemberID();
+
+			const res = await fetch(`${BASE_URL}/match/queue`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ publicKey: myEcdhPkBase64, nickname: myNickname })
+			});
+			const result = await res.json();
+
+			if (result.responseCode === '17' && result.data?.status === 'waiting') {
+				matchQueueId = result.data.queueId;
+				roomId = result.data.queueId;
+				roomState = 'match_waiting';
+				connectWebSocket(myEcdhPkBase64);
+				return;
+			}
+
+			if (result.responseCode === '00' && result.data?.status === 'matched') {
+				matchQueueId = '';
+				roomId = result.data.roomId;
+				await transitionToMatchedRoom(result.data.peerPublicKey, myEcdhPkBase64);
+				return;
+			}
+
+			throw new Error(result.responseMessage || 'Gagal memulai random match.');
+		} catch (err: any) {
+			errorMessage = err.message || 'Error memulai random match, silakan coba lagi.';
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	// Cancel matchmaking queue
+	async function handleCancelMatchmaking() {
+		if (matchQueueId) {
+			try {
+				await fetch(`${BASE_URL}/match/queue/${matchQueueId}`, { method: 'DELETE' });
+			} catch (err) {
+				console.error('Error cancelling random match queue:', err);
+			}
+		}
+		matchQueueId = '';
+		if (socket) {
+			socket.close();
+			socket = null;
+		}
+
+		const params = new URLSearchParams(window.location.search);
+		if (params.get('tab') === 'match') {
+			await goto(resolve('/'));
+		} else {
+			roomState = 'setup';
 		}
 	}
 
@@ -484,8 +615,7 @@
 						ciphertext,
 						iv,
 						signature,
-						timestamp,
-						publicKey: myEcdsaPkBase64
+						timestamp
 					}
 				};
 
@@ -531,6 +661,7 @@
 		aesKey = null;
 		nicknameInput = '';
 		roomCodeInput = '';
+		matchQueueId = '';
 		stopTimer();
 	}
 
@@ -546,14 +677,25 @@
 		];
 	}
 
-	// Initialize scroll and timer on load
+	// Initialize view based on query tab
 	onMount(() => {
 		const params = new URLSearchParams(window.location.search);
 		const tab = params.get('tab');
-		if (tab === 'create' || tab === 'join') {
+		if (tab === 'match') {
+			activeTab = 'match';
+			nicknameInput = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
+		} else if (tab === 'create' || tab === 'join') {
 			activeTab = tab;
 		}
+
 		scrollToBottom();
+
+		return () => {
+			stopTimer();
+			if (socket) {
+				socket.close();
+			}
+		};
 	});
 </script>
 
@@ -561,7 +703,9 @@
 	{#if roomState === 'setup'}
 		<!-- SETUP WELCOME SCREEN -->
 		<div class="flex items-center justify-center h-full p-6">
-			<div class="w-full max-w-md bg-white rounded-2xl shadow-premium border border-outline-variant/30 overflow-hidden flex flex-col p-6 space-y-6">
+			<div
+				class="w-full max-w-md bg-white rounded-2xl shadow-premium border border-outline-variant/30 overflow-hidden flex flex-col p-6 space-y-6"
+			>
 				<!-- Brand -->
 				<div class="flex items-center space-x-3 justify-center">
 					<img src="/logo.webp" alt="UMBRA Logo" class="w-12 h-12 object-contain rounded-xl" />
@@ -576,29 +720,58 @@
 				<!-- Setup Tabs -->
 				<div class="flex border-b border-outline-variant/20">
 					<button
-						onclick={() => { activeTab = 'create'; errorMessage = ''; }}
-						class="flex-1 pb-3 text-center font-medium text-sm transition-colors {activeTab === 'create' ? 'border-b-2 border-primary text-primary font-bold' : 'text-outline hover:text-on-surface'}"
+						onclick={() => {
+							activeTab = 'create';
+							errorMessage = '';
+						}}
+						class="flex-1 pb-3 text-center font-medium text-sm transition-colors {activeTab ===
+						'create'
+							? 'border-b-2 border-primary text-primary font-bold'
+							: 'text-outline hover:text-on-surface'}"
 					>
 						Create Room
 					</button>
 					<button
-						onclick={() => { activeTab = 'join'; errorMessage = ''; }}
-						class="flex-1 pb-3 text-center font-medium text-sm transition-colors {activeTab === 'join' ? 'border-b-2 border-primary text-primary font-bold' : 'text-outline hover:text-on-surface'}"
+						onclick={() => {
+							activeTab = 'join';
+							errorMessage = '';
+						}}
+						class="flex-1 pb-3 text-center font-medium text-sm transition-colors {activeTab ===
+						'join'
+							? 'border-b-2 border-primary text-primary font-bold'
+							: 'text-outline hover:text-on-surface'}"
 					>
 						Join Room
+					</button>
+					<button
+						onclick={() => {
+							activeTab = 'match';
+							errorMessage = '';
+						}}
+						class="flex-1 pb-3 text-center font-medium text-sm transition-colors {activeTab ===
+						'match'
+							? 'border-b-2 border-primary text-primary font-bold'
+							: 'text-outline hover:text-on-surface'}"
+					>
+						Random Match
 					</button>
 				</div>
 
 				<!-- Input Form -->
 				<div class="space-y-4 pt-2">
 					{#if errorMessage}
-						<div class="p-3 bg-error-container text-on-error-container rounded-xl text-sm border border-error/20">
+						<div
+							class="p-3 bg-error-container text-on-error-container rounded-xl text-sm border border-error/20"
+						>
 							{errorMessage}
 						</div>
 					{/if}
 
 					<div class="flex flex-col space-y-2">
-						<label for="nickname" class="font-label-mono text-sm text-outline uppercase tracking-widest">Nickname</label>
+						<label
+							for="nickname"
+							class="font-label-mono text-sm text-outline uppercase tracking-widest">Nickname</label
+						>
 						<input
 							type="text"
 							id="nickname"
@@ -611,7 +784,11 @@
 
 					{#if activeTab === 'join'}
 						<div class="flex flex-col space-y-2">
-							<label for="room-code-input" class="font-label-mono text-sm text-outline uppercase tracking-widest">Room Code</label>
+							<label
+								for="room-code-input"
+								class="font-label-mono text-sm text-outline uppercase tracking-widest"
+								>Room Code</label
+							>
 							<input
 								type="text"
 								id="room-code-input"
@@ -631,25 +808,45 @@
 								class="w-full py-4 bg-primary-container text-white font-bold rounded-xl shadow-premium hover:bg-primary transition-all active:scale-[0.98] flex items-center justify-center space-x-2"
 							>
 								{#if isLoading}
-									<div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+									<div
+										class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
+									></div>
 									<span>Generating Room...</span>
 								{:else}
 									<span class="material-symbols-outlined text-[20px]">add_circle</span>
 									<span>Create Room</span>
 								{/if}
 							</button>
-						{:else}
+						{:else if activeTab === 'join'}
 							<button
 								onclick={handleJoinRoom}
 								disabled={isLoading}
 								class="w-full py-4 bg-primary-container text-white font-bold rounded-xl shadow-premium hover:bg-primary transition-all active:scale-[0.98] flex items-center justify-center space-x-2"
 							>
 								{#if isLoading}
-									<div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+									<div
+										class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
+									></div>
 									<span>Connecting...</span>
 								{:else}
 									<span class="material-symbols-outlined text-[20px]">login</span>
 									<span>Join Room</span>
+								{/if}
+							</button>
+						{:else if activeTab === 'match'}
+							<button
+								onclick={handleStartMatchmaking}
+								disabled={isLoading}
+								class="w-full py-4 bg-primary-container text-white font-bold rounded-xl shadow-premium hover:bg-primary transition-all active:scale-[0.98] flex items-center justify-center space-x-2"
+							>
+								{#if isLoading}
+									<div
+										class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
+									></div>
+									<span>Mencari...</span>
+								{:else}
+									<span class="material-symbols-outlined text-[20px]">shuffle</span>
+									<span>Cari Teman Chat</span>
 								{/if}
 							</button>
 						{/if}
@@ -657,68 +854,223 @@
 				</div>
 			</div>
 		</div>
+	{:else if roomState === 'match_waiting'}
+		<!-- RANDOM MATCH WAITING SCREEN -->
+		<div class="flex flex-col h-full bg-[#F4F6F9] text-on-background relative">
+			<!-- Header -->
+			<header
+				class="h-16 flex-shrink-0 flex items-center justify-between px-8 border-b border-outline-variant/30 bg-white"
+			>
+				<!-- Kembali Button -->
+				<button
+					onclick={handleCancelMatchmaking}
+					class="flex items-center space-x-2 text-sm font-bold text-outline hover:text-on-surface transition-colors cursor-pointer"
+				>
+					<span class="material-symbols-outlined text-[20px]">arrow_back</span>
+					<span class="tracking-wide uppercase font-label-mono text-xs">KEMBALI</span>
+				</button>
+
+				<!-- Title -->
+				<span class="font-bold text-lg text-primary tracking-tight font-['Space_Grotesk']"
+					>UMBRA</span
+				>
+
+				<!-- Status Badge -->
+				<div
+					class="flex items-center space-x-2 bg-[#E6F4EA] text-[#137333] px-3.5 py-1.5 rounded-full text-xs font-semibold select-none"
+				>
+					<span class="w-1.5 h-1.5 rounded-full bg-[#137333]"></span>
+					<span class="font-label-mono text-[11px] uppercase tracking-wider font-bold"
+						>E2EE Ready</span
+					>
+				</div>
+			</header>
+
+			<!-- Main Content Area -->
+			<div
+				class="flex-grow flex flex-col items-center justify-center p-6 max-w-lg mx-auto w-full text-center space-y-12"
+			>
+				<!-- Avatars & Line Connection -->
+				<div class="flex items-center justify-between w-full max-w-sm relative">
+					<!-- Connection Line -->
+					<div class="absolute left-16 right-16 top-1/2 -translate-y-1/2 h-[2px] bg-gray-200">
+						<!-- Glowing Dot Animation -->
+						<div
+							class="absolute top-0 bottom-0 w-4 bg-[#00aeef] rounded-full animate-flow-dot"
+						></div>
+					</div>
+
+					<!-- Left Avatar (ANDA) -->
+					<div class="flex flex-col items-center space-y-3 z-10">
+						<div
+							class="w-20 h-20 rounded-full border-4 border-[#00aeef] bg-primary flex items-center justify-center text-white font-bold text-2xl shadow-premium ring-4 ring-[#00aeef]/20 select-none"
+						>
+							{myInitials}
+						</div>
+						<span class="text-xs font-bold text-[#00aeef] tracking-widest uppercase font-label-mono"
+							>ANDA</span
+						>
+					</div>
+
+					<!-- Right Avatar (MENCARI) -->
+					<div class="flex flex-col items-center space-y-3 z-10">
+						<div
+							class="w-20 h-20 rounded-full bg-gray-200 border-4 border-white flex items-center justify-center text-gray-400 font-bold text-3xl shadow-sm animate-pulse select-none"
+						>
+							?
+						</div>
+						<span class="text-xs font-bold text-gray-400 tracking-widest uppercase font-label-mono"
+							>MENCARI...</span
+						>
+					</div>
+				</div>
+
+				<!-- Message -->
+				<div class="space-y-3">
+					<h3 class="text-xl font-bold text-on-surface">Mencari lawan bicara...</h3>
+					<p class="text-sm text-outline leading-relaxed">
+						Sistem kami sedang mengenkripsi jalur komunikasi<br />untuk sesi anonim Anda.
+					</p>
+				</div>
+
+				<!-- Infinite Loader Line -->
+				<div class="w-full max-w-sm h-1.5 bg-gray-200/60 rounded-full overflow-hidden relative">
+					<div
+						class="absolute top-0 bottom-0 bg-gradient-to-r from-[#00aeef] to-[#00658d] w-1/3 rounded-full animate-infinite-slide"
+					></div>
+				</div>
+
+				<!-- Stats Banner -->
+				<div
+					class="w-full bg-[#0F3460] text-white py-3.5 px-6 rounded-2xl flex items-center justify-between text-xs font-semibold shadow-premium font-label-mono select-none"
+				>
+					<div class="flex items-center space-x-2 relative">
+						<span class="w-2 h-2 rounded-full bg-[#10B981] animate-ping"></span>
+						<span class="w-2 h-2 rounded-full bg-[#10B981] absolute"></span>
+						<span class="pl-3">1.240 pengguna online</span>
+					</div>
+					<span class="opacity-30">|</span>
+					<div class="flex items-center space-x-2">
+						<span class="w-2.5 h-2.5 rounded-full bg-[#00aeef]"></span>
+						<span>Enkripsi aktif</span>
+					</div>
+					<span class="opacity-30">|</span>
+					<div class="flex items-center space-x-1.5">
+						<span class="material-symbols-outlined text-[16px]">timer</span>
+						<span>&lt; 30 detik</span>
+					</div>
+				</div>
+
+				<!-- Cancel Button -->
+				<div class="space-y-4 pt-4">
+					<button
+						onclick={handleCancelMatchmaking}
+						class="px-10 py-4 bg-[#0A6C8B] text-white font-bold rounded-xl shadow-premium hover:bg-[#085A75] hover:shadow-lg transition-all active:scale-[0.98] text-sm uppercase tracking-wider cursor-pointer"
+					>
+						Batalkan pencarian
+					</button>
+					<p class="text-[10px] font-bold text-outline tracking-widest font-label-mono">
+						EST. WAIT: &lt; 30S
+					</p>
+				</div>
+			</div>
+		</div>
 	{:else}
 		<!-- CHAT ROOM INTERFACE -->
 		<div class="flex h-screen overflow-hidden w-full bg-surface-container-lowest">
 			<!-- Sidebar (Left, 300px) -->
-			<aside class="w-[300px] flex-shrink-0 bg-surface-container-low border-r border-outline-variant/20 flex flex-col justify-between sidebar-transition">
+			<aside
+				class="w-[300px] flex-shrink-0 bg-surface-container-low border-r border-outline-variant/20 flex flex-col justify-between sidebar-transition"
+			>
 				<div class="p-gutter space-y-8">
 					<!-- Brand Anchor -->
 					<div class="flex items-center space-x-3">
 						<img src="/logo.webp" alt="UMBRA Logo" class="w-10 h-10 object-contain rounded-xl" />
-						<span class="font-bold text-2xl text-primary tracking-tight font-['Space_Grotesk']">UMBRA</span>
+						<span class="font-bold text-2xl text-primary tracking-tight font-['Space_Grotesk']"
+							>UMBRA</span
+						>
 					</div>
-					
+
 					<!-- Session Identity -->
 					<div class="space-y-stack-md">
 						<div class="flex flex-col space-y-2">
-							<span class="font-label-mono text-sm text-outline uppercase tracking-widest text-[12px]">Active Alias</span>
-							<div class="flex items-center space-x-3 bg-surface-container-highest p-3 rounded-xl border border-outline-variant/30">
-								<div class="w-8 h-8 rounded-full bg-secondary-fixed flex items-center justify-center text-on-secondary-fixed font-semibold">
+							<span
+								class="font-label-mono text-sm text-outline uppercase tracking-widest text-[12px]"
+								>Active Alias</span
+							>
+							<div
+								class="flex items-center space-x-3 bg-surface-container-highest p-3 rounded-xl border border-outline-variant/30"
+							>
+								<div
+									class="w-8 h-8 rounded-full bg-secondary-fixed flex items-center justify-center text-on-secondary-fixed font-semibold"
+								>
 									<span class="material-symbols-outlined text-[18px]">person</span>
 								</div>
 								<span class="font-medium text-on-surface">{myNickname}</span>
 							</div>
 						</div>
-						
+
 						<div class="flex flex-col space-y-2">
-							<span class="font-label-mono text-sm text-outline uppercase tracking-widest text-[12px]">Room Code</span>
+							<span
+								class="font-label-mono text-sm text-outline uppercase tracking-widest text-[12px]"
+								>Room Code</span
+							>
 							<!-- svelte-ignore a11y_click_events_have_key_events -->
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<div class="group relative flex items-center justify-between bg-white p-3 rounded-xl border border-outline-variant/30 cursor-pointer hover:border-primary transition-colors" onclick={copyCode}>
-								<span class="font-label-mono text-primary font-bold tracking-tighter" id="room-code">{roomCode}</span>
-								<span class="material-symbols-outlined text-outline group-hover:text-primary transition-colors text-[20px]">content_copy</span>
+							<div
+								class="group relative flex items-center justify-between bg-white p-3 rounded-xl border border-outline-variant/30 cursor-pointer hover:border-primary transition-colors"
+								onclick={copyCode}
+							>
+								<span class="font-label-mono text-primary font-bold tracking-tighter" id="room-code"
+									>{roomCode}</span
+								>
+								<span
+									class="material-symbols-outlined text-outline group-hover:text-primary transition-colors text-[20px]"
+									>content_copy</span
+								>
 							</div>
 						</div>
 					</div>
-					
+
 					<!-- Status Badges -->
 					<div class="space-y-stack-sm pt-4 border-t border-outline-variant/20">
 						<div class="flex items-center space-x-3 px-1">
 							<div class="relative flex h-2 w-2">
-								<span class="pulse-green absolute inline-flex h-full w-full rounded-full bg-tertiary-container opacity-75"></span>
-								<span class="relative inline-flex rounded-full h-2 w-2 bg-tertiary-container"></span>
+								<span
+									class="pulse-green absolute inline-flex h-full w-full rounded-full bg-tertiary-container opacity-75"
+								></span>
+								<span class="relative inline-flex rounded-full h-2 w-2 bg-tertiary-container"
+								></span>
 							</div>
 							<span class="font-label-mono text-[12px] text-tertiary font-bold">
 								{#if aesKey}E2EE ACTIVE{:else}E2EE WAITING{/if}
 							</span>
 						</div>
 						<div class="flex items-center space-x-3 px-1">
-							<span class="material-symbols-outlined {isConnected ? 'text-primary' : 'text-outline'} text-[18px]">wifi_tethering</span>
+							<span
+								class="material-symbols-outlined {isConnected
+									? 'text-primary'
+									: 'text-outline'} text-[18px]">wifi_tethering</span
+							>
 							<span class="font-label-mono text-[12px] text-on-surface-variant uppercase">
 								WS: {isConnected ? 'CONNECTED' : 'DISCONNECTED'}
 							</span>
 						</div>
 						<div class="flex items-center space-x-3 px-1">
 							<span class="material-symbols-outlined text-outline text-[18px]">timer</span>
-							<span class="font-label-mono text-[12px] text-on-surface-variant">TTL: {formatTime(timeLeft)}</span>
+							<span class="font-label-mono text-[12px] text-on-surface-variant"
+								>TTL: {formatTime(timeLeft)}</span
+							>
 						</div>
 					</div>
 				</div>
-				
+
 				<!-- Footer Action -->
 				<div class="p-gutter">
-					<button onclick={leaveRoom} class="w-full flex items-center justify-center space-x-2 py-4 bg-[#EF4444]/10 text-[#EF4444] rounded-xl font-bold hover:bg-[#EF4444] hover:text-white transition-all duration-200 active:scale-[0.98]">
+					<button
+						onclick={leaveRoom}
+						class="w-full flex items-center justify-center space-x-2 py-4 bg-[#EF4444]/10 text-[#EF4444] rounded-xl font-bold hover:bg-[#EF4444] hover:text-white transition-all duration-200 active:scale-[0.98]"
+					>
 						<span class="material-symbols-outlined">logout</span>
 						<span>Leave Room</span>
 					</button>
@@ -728,27 +1080,37 @@
 			<!-- Main Area: Chat Content -->
 			<main class="flex-grow flex flex-col relative bg-white">
 				<!-- Chat Header (Contextual) -->
-				<header class="h-16 flex items-center justify-between px-gutter border-b border-outline-variant/10 z-10 bg-white/80 backdrop-blur-md">
+				<header
+					class="h-16 flex items-center justify-between px-gutter border-b border-outline-variant/10 z-10 bg-white/80 backdrop-blur-md"
+				>
 					<div class="flex items-center space-x-4">
 						<div class="flex -space-x-2">
-							<div class="w-8 h-8 rounded-full border-2 border-white bg-primary-fixed flex items-center justify-center text-[10px] font-bold text-on-primary-fixed-variant select-none">
+							<div
+								class="w-8 h-8 rounded-full border-2 border-white bg-primary-fixed flex items-center justify-center text-[10px] font-bold text-on-primary-fixed-variant select-none"
+							>
 								{myInitials}
 							</div>
 							{#if aesKey}
-								<div class="w-8 h-8 rounded-full border-2 border-white bg-tertiary-fixed flex items-center justify-center text-[10px] font-bold text-on-tertiary-fixed-variant select-none">
+								<div
+									class="w-8 h-8 rounded-full border-2 border-white bg-tertiary-fixed flex items-center justify-center text-[10px] font-bold text-on-tertiary-fixed-variant select-none"
+								>
 									JS
 								</div>
 							{/if}
 						</div>
 						<h2 class="font-bold text-lg text-on-surface font-['Space_Grotesk']">
-							Anonymous Session <span class="text-outline-variant ml-2 font-normal font-sans">#421</span>
+							Anonymous Session <span class="text-outline-variant ml-2 font-normal font-sans"
+								>#421</span
+							>
 						</h2>
 					</div>
-					
+
 					<div class="flex items-center space-x-2 relative">
 						<!-- Toggle Search Input or Search Button (Right next to dropdown) -->
 						{#if showSearchInput}
-							<div class="flex items-center bg-surface-container-low px-3 py-1.5 rounded-lg border border-outline-variant/30 max-w-xs transition-all animate-in fade-in slide-in-from-right-2 duration-150 mr-1">
+							<div
+								class="flex items-center bg-surface-container-low px-3 py-1.5 rounded-lg border border-outline-variant/30 max-w-xs transition-all animate-in fade-in slide-in-from-right-2 duration-150 mr-1"
+							>
 								<span class="material-symbols-outlined text-[16px] text-outline mr-2">search</span>
 								<input
 									type="text"
@@ -756,36 +1118,57 @@
 									placeholder="Search message..."
 									class="bg-transparent border-none text-xs focus:ring-0 p-0 text-on-surface outline-none w-36 font-body-md"
 								/>
-								<button onclick={() => { showSearchInput = false; searchQuery = ''; }} class="p-1 hover:text-red-500 transition-colors ml-1 flex items-center">
+								<button
+									onclick={() => {
+										showSearchInput = false;
+										searchQuery = '';
+									}}
+									class="p-1 hover:text-red-500 transition-colors ml-1 flex items-center"
+								>
 									<span class="material-symbols-outlined text-[16px]">close</span>
 								</button>
 							</div>
 						{:else}
-							<button 
-								onclick={() => showSearchInput = true} 
+							<button
+								onclick={() => (showSearchInput = true)}
 								class="p-2 text-on-surface-variant hover:bg-surface-container rounded-lg transition-colors"
 							>
 								<span class="material-symbols-outlined">search</span>
 							</button>
 						{/if}
-						
+
 						<!-- More Options Menu with Dropdown -->
 						<div>
-							<button 
-								onclick={() => showMoreMenu = !showMoreMenu} 
-								class="p-2 text-on-surface-variant hover:bg-surface-container rounded-lg transition-colors {showMoreMenu ? 'bg-surface-container text-primary' : ''}"
+							<button
+								onclick={() => (showMoreMenu = !showMoreMenu)}
+								class="p-2 text-on-surface-variant hover:bg-surface-container rounded-lg transition-colors {showMoreMenu
+									? 'bg-surface-container text-primary'
+									: ''}"
 							>
 								<span class="material-symbols-outlined">more_vert</span>
 							</button>
 							{#if showMoreMenu}
 								<!-- svelte-ignore a11y_click_events_have_key_events -->
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
-								<div class="absolute right-0 mt-2 w-48 bg-white border border-outline-variant/30 rounded-xl shadow-premium py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150" onclick={() => showMoreMenu = false}>
-									<button onclick={clearChat} class="w-full text-left px-4 py-2 text-sm text-on-surface hover:bg-surface-container transition-colors flex items-center space-x-2">
+								<div
+									class="absolute right-0 mt-2 w-48 bg-white border border-outline-variant/30 rounded-xl shadow-premium py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+									onclick={() => (showMoreMenu = false)}
+								>
+									<button
+										onclick={clearChat}
+										class="w-full text-left px-4 py-2 text-sm text-on-surface hover:bg-surface-container transition-colors flex items-center space-x-2"
+									>
 										<span class="material-symbols-outlined text-[18px]">delete_sweep</span>
 										<span>Clear Chat</span>
 									</button>
-									<button onclick={() => { toastMessage = 'Notifications muted'; showToast = true; setTimeout(() => showToast = false, 2000); }} class="w-full text-left px-4 py-2 text-sm text-on-surface hover:bg-surface-container transition-colors flex items-center space-x-2">
+									<button
+										onclick={() => {
+											toastMessage = 'Notifications muted';
+											showToast = true;
+											setTimeout(() => (showToast = false), 2000);
+										}}
+										class="w-full text-left px-4 py-2 text-sm text-on-surface hover:bg-surface-container transition-colors flex items-center space-x-2"
+									>
 										<span class="material-symbols-outlined text-[18px]">volume_off</span>
 										<span>Mute Session</span>
 									</button>
@@ -796,9 +1179,15 @@
 				</header>
 
 				<!-- ACTIVE CHAT AREA (Filtered by search) -->
-				<div bind:this={chatContainer} class="flex-grow overflow-y-auto p-gutter space-y-6 chat-scroll" id="chat-container">
+				<div
+					bind:this={chatContainer}
+					class="flex-grow overflow-y-auto p-gutter space-y-6 chat-scroll"
+					id="chat-container"
+				>
 					{#if filteredMessages.length === 0}
-						<div class="flex flex-col items-center justify-center h-full text-outline py-8 text-center space-y-2">
+						<div
+							class="flex flex-col items-center justify-center h-full text-outline py-8 text-center space-y-2"
+						>
 							<span class="material-symbols-outlined text-[36px]">search_off</span>
 							<p class="text-sm">No messages match your search query.</p>
 						</div>
@@ -807,7 +1196,9 @@
 							{#if msg.type === 'system'}
 								<div class="flex justify-center">
 									{#if msg.boxed}
-										<p class="italic text-on-surface-variant/60 text-sm bg-surface-container-low px-4 py-1 rounded-full border border-outline-variant/10 text-center">
+										<p
+											class="italic text-on-surface-variant/60 text-sm bg-surface-container-low px-4 py-1 rounded-full border border-outline-variant/10 text-center"
+										>
 											{msg.text}
 										</p>
 									{:else}
@@ -818,21 +1209,29 @@
 								</div>
 							{:else if msg.type === 'partner'}
 								<div class="flex items-end space-x-2 max-w-[80%]">
-									<div class="w-8 h-8 rounded-full bg-secondary-container flex-shrink-0 flex items-center justify-center text-[12px] font-bold text-on-secondary-container">
+									<div
+										class="w-8 h-8 rounded-full bg-secondary-container flex-shrink-0 flex items-center justify-center text-[12px] font-bold text-on-secondary-container"
+									>
 										{msg.sender}
 									</div>
-									<div class="bg-[#F5F8FA] text-on-surface p-4 rounded-2xl shadow-sm bubble-partner">
+									<div
+										class="bg-[#F5F8FA] text-on-surface p-4 rounded-2xl shadow-sm bubble-partner"
+									>
 										<p class="text-base whitespace-pre-wrap select-text">{msg.text}</p>
 										<span class="block mt-2 text-[10px] text-outline text-right">{msg.time}</span>
 									</div>
 								</div>
 							{:else if msg.type === 'self'}
 								<div class="flex items-end justify-end space-x-2 ml-auto max-w-[80%]">
-									<div class="bg-primary-container text-white p-4 rounded-2xl shadow-premium bubble-self">
+									<div
+										class="bg-primary-container text-white p-4 rounded-2xl shadow-premium bubble-self"
+									>
 										<p class="text-base whitespace-pre-wrap select-text">{msg.text}</p>
 										<span class="block mt-2 text-[10px] opacity-70 text-right">{msg.time}</span>
 									</div>
-									<div class="w-8 h-8 rounded-full bg-primary flex-shrink-0 flex items-center justify-center text-[12px] font-bold text-white font-label-mono">
+									<div
+										class="w-8 h-8 rounded-full bg-primary flex-shrink-0 flex items-center justify-center text-[12px] font-bold text-white font-label-mono"
+									>
 										{msg.sender}
 									</div>
 								</div>
@@ -843,7 +1242,9 @@
 
 				<!-- Sticky Input Area -->
 				<div class="p-gutter pt-2 bg-white">
-					<div class="max-w-[1000px] mx-auto bg-white border border-outline-variant/30 rounded-2xl shadow-sm focus-within:ring-4 focus-within:ring-primary-container/10 focus-within:border-primary transition-all">
+					<div
+						class="max-w-[1000px] mx-auto bg-white border border-outline-variant/30 rounded-2xl shadow-sm focus-within:ring-4 focus-within:ring-primary-container/10 focus-within:border-primary transition-all"
+					>
 						<div class="flex items-center p-2 border-b border-outline-variant/10 space-x-2">
 							<button class="p-2 text-outline-variant hover:text-primary transition-colors">
 								<span class="material-symbols-outlined">format_bold</span>
@@ -855,7 +1256,9 @@
 								<span class="material-symbols-outlined">sentiment_satisfied</span>
 							</button>
 							<div class="h-4 w-[1px] bg-outline-variant/30 mx-2"></div>
-							<span class="text-[10px] font-label-mono text-outline-variant uppercase">Ephemeral Encryption Active</span>
+							<span class="text-[10px] font-label-mono text-outline-variant uppercase"
+								>Ephemeral Encryption Active</span
+							>
 						</div>
 						<div class="flex items-end p-3 space-x-3">
 							<textarea
@@ -865,19 +1268,23 @@
 								class="flex-grow bg-transparent border-none focus:ring-0 resize-none max-h-32 text-base py-2 px-1 text-on-surface placeholder-outline-variant/60 outline-none"
 								id="message-input"
 								placeholder="Ketik pesan..."
-								rows="1"
-							></textarea>
+								rows="1"></textarea>
 							<button
 								onclick={sendMessage}
 								class="w-12 h-12 bg-primary-container rounded-xl flex items-center justify-center text-white shadow-premium hover:bg-primary transition-all active:scale-[0.98] flex-shrink-0 group"
 								id="send-btn"
 							>
-								<span class="material-symbols-outlined group-hover:translate-x-0.5 transition-transform">send</span>
+								<span
+									class="material-symbols-outlined group-hover:translate-x-0.5 transition-transform"
+									>send</span
+								>
 							</button>
 						</div>
 					</div>
 					<div class="flex justify-center py-4">
-						<p class="text-[11px] font-label-mono text-outline-variant uppercase tracking-widest flex items-center">
+						<p
+							class="text-[11px] font-label-mono text-outline-variant uppercase tracking-widest flex items-center"
+						>
 							<span class="material-symbols-outlined text-[14px] mr-1">history_toggle_off</span>
 							Messages vanish upon session termination
 						</p>
@@ -890,7 +1297,9 @@
 
 <!-- Copy Toast Notification -->
 {#if showToast}
-	<div class="fixed bottom-24 left-1/2 -translate-x-1/2 bg-inverse-surface text-white px-6 py-3 rounded-full text-sm font-medium shadow-lg z-50 animate-bounce">
+	<div
+		class="fixed bottom-24 left-1/2 -translate-x-1/2 bg-inverse-surface text-white px-6 py-3 rounded-full text-sm font-medium shadow-lg z-50 animate-bounce"
+	>
 		{toastMessage}
 	</div>
 {/if}

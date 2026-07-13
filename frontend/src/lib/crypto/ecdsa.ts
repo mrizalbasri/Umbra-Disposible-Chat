@@ -4,7 +4,10 @@ const ECDSA_PARAMS = { name: 'ECDSA', namedCurve: 'P-256' } as const;
 const SIGN_ALGO = { name: 'ECDSA', hash: 'SHA-256' } as const;
 
 const toBase64 = (buf: ArrayBuffer | ArrayBufferView): string => {
-	const u8 = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+	const u8 =
+		buf instanceof ArrayBuffer
+			? new Uint8Array(buf)
+			: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 	return btoa(Array.from(u8, (b) => String.fromCharCode(b)).join(''));
 };
 const fromBase64 = (s: string): ArrayBuffer => {
@@ -21,15 +24,17 @@ export function generateSigningKeyPair(): Promise<CryptoKeyPair> {
 	return crypto.subtle.generateKey(ECDSA_PARAMS, true, ['sign', 'verify']);
 }
 
-/** Export signing public key → base64 to share with peer. */
+/** Export signing public key → base64 (spki format) to share with peer. */
 export async function exportSigningPublicKey(publicKey: CryptoKey): Promise<string> {
-	const raw = await crypto.subtle.exportKey('raw', publicKey);
-	return toBase64(raw);
+	const spki = await crypto.subtle.exportKey('spki', publicKey);
+	return toBase64(spki);
 }
 
-/** Import peer's base64 signing public key → CryptoKey for verify(). */
+/** Import peer's base64 signing public key → CryptoKey for verify() (supports both spki and raw formats). */
 export function importSigningPublicKey(base64Key: string): Promise<CryptoKey> {
-	return crypto.subtle.importKey('raw', fromBase64(base64Key), ECDSA_PARAMS, true, ['verify']);
+	const buf = fromBase64(base64Key);
+	const format = buf.byteLength === 65 ? 'raw' : 'spki';
+	return crypto.subtle.importKey(format, buf, ECDSA_PARAMS, true, ['verify']);
 }
 
 /** Sign data with our private key → base64 signature. */
