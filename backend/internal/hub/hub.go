@@ -30,7 +30,6 @@ type SendMessagePayload struct {
 	IV         string `json:"iv"`
 	Signature  string `json:"signature"`
 	Timestamp  string `json:"timestamp"`
-	PublicKey  string `json:"publicKey,omitempty"`
 }
 
 type Hub struct {
@@ -74,10 +73,7 @@ func (h *Hub) Run() {
 						joinedNotify, _ := json.Marshal(map[string]interface{}{
 							"event": "peer_joined",
 							"payload": map[string]string{
-								"publicKey":      client.PublicKey,
-								"memberId":       client.MemberID,
-								"ecdhPublicKey":  client.EcdhPublicKey,
-								"ecdsaPublicKey": client.EcdsaPublicKey,
+								"publicKey": client.PublicKey,
 							},
 						})
 						select {
@@ -108,7 +104,7 @@ func (h *Hub) Run() {
 							destroyedNotify, _ := json.Marshal(map[string]interface{}{
 								"event": "room_destroyed",
 								"payload": map[string]string{
-									"reason": "all members left",
+									"reason": "all_members_left",
 								},
 							})
 							_ = peer.Conn.WriteMessage(websocket.TextMessage, destroyedNotify)
@@ -121,10 +117,7 @@ func (h *Hub) Run() {
 							leftNotify, _ := json.Marshal(map[string]interface{}{
 								"event": "peer_left",
 								"payload": map[string]string{
-									"publicKey":      client.PublicKey,
-									"memberId":       client.MemberID,
-									"ecdhPublicKey":  client.EcdhPublicKey,
-									"ecdsaPublicKey": client.EcdsaPublicKey,
+									"publicKey": client.PublicKey,
 								},
 							})
 							select {
@@ -164,16 +157,14 @@ func (h *Hub) Run() {
 func (h *Hub) HandleWS(c *websocket.Conn) {
 	roomID := c.Query("roomId")
 	pubKey := c.Query("publicKey")
-	memberID := c.Query("memberId")
-	ecdhPublicKey := c.Query("ecdhPublicKey")
-	ecdsaPublicKey := c.Query("ecdsaPublicKey")
-
-	if ecdsaPublicKey == "" {
-		ecdsaPublicKey = pubKey
-	}
 
 	if roomID == "" {
 		h.sendError(c, "11", "roomId diperlukan di query parameter")
+		_ = c.Close()
+		return
+	}
+	if pubKey == "" {
+		h.sendError(c, "12", "publicKey diperlukan di query parameter")
 		_ = c.Close()
 		return
 	}
@@ -181,9 +172,8 @@ func (h *Hub) HandleWS(c *websocket.Conn) {
 	client := &Client{
 		Conn:           c,
 		RoomID:         roomID,
-		MemberID:       memberID,
-		EcdhPublicKey:  ecdhPublicKey,
-		EcdsaPublicKey: ecdsaPublicKey,
+		EcdhPublicKey:  pubKey,
+		EcdsaPublicKey: pubKey,
 		PublicKey:      pubKey,
 		Send:           make(chan []byte, 256),
 	}
@@ -221,11 +211,7 @@ func (h *Hub) HandleWS(c *websocket.Conn) {
 				break
 			}
 
-			publicKeyForVerification := client.EcdsaPublicKey
-			if payload.PublicKey != "" {
-				publicKeyForVerification = payload.PublicKey
-			}
-
+			publicKeyForVerification := client.PublicKey
 			if publicKeyForVerification == "" {
 				h.sendError(c, "16", "Public key tidak tersedia untuk verifikasi tanda tangan")
 				continue

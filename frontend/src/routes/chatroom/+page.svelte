@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import {
 		generateKeyPair,
 		exportPublicKey,
@@ -27,6 +28,7 @@
 	let roomCodeInput = $state('');
 	let isLoading = $state(false);
 	let errorMessage = $state('');
+	let matchQueueId = $state('');
 
 	// Interactive features state
 	let showSearchInput = $state(false);
@@ -149,6 +151,32 @@
 		return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}s`;
 	}
 
+	function createClientMemberID(): string {
+		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+			return crypto.randomUUID();
+		}
+		return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	}
+
+	async function transitionToMatchedRoom(peerPublicKey: string, myEcdhPkBase64: string) {
+		peerEcdhPublicKey = await importPublicKey(peerPublicKey);
+		const sharedSecret = await deriveSharedSecret(myEcdhKeyPair!.privateKey, peerEcdhPublicKey);
+		aesKey = await deriveAESKey(sharedSecret);
+
+		messages = [
+			{
+				id: 'init-sys',
+				type: 'system',
+				text: 'Session established. Messages will self-destruct on disconnect.',
+				boxed: true
+			}
+		];
+
+		roomState = 'chat';
+		startTimer();
+		connectWebSocket(myEcdhPkBase64);
+	}
+
 	// Auto-growing input box
 	$effect(() => {
 		if (textareaElement && messageInput !== undefined) {
@@ -184,7 +212,7 @@
 
 	// Connect to WebSocket and bind message handlers (deferred hook)
 	function connectWebSocket(myEcdhPkBase64: string) {
-		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&memberId=${memberId}&ecdhPublicKey=${encodeURIComponent(myEcdhPkBase64)}&ecdsaPublicKey=${encodeURIComponent(myEcdsaPkBase64)}`;
+		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&publicKey=${encodeURIComponent(myEcdhPkBase64)}`;
 		socket = new WebSocket(wsUrl);
 
 		socket.onopen = () => {
@@ -214,8 +242,7 @@
 				}
 
 				if (data.event === 'peer_joined') {
-					peerEcdhPublicKey = await importPublicKey(data.payload.ecdhPublicKey);
-					peerEcdsaPublicKey = await importSigningPublicKey(data.payload.ecdsaPublicKey);
+					peerEcdhPublicKey = await importPublicKey(data.payload.publicKey);
 
 					const sharedSecret = await deriveSharedSecret(myEcdhKeyPair!.privateKey, peerEcdhPublicKey);
 					aesKey = await deriveAESKey(sharedSecret);
@@ -328,8 +355,7 @@
 				ciphertext,
 				iv,
 				signature,
-				timestamp,
-				publicKey: myEcdsaPkBase64
+				timestamp
 			}
 		};
 
@@ -351,7 +377,7 @@
 			const res = await fetch(`${BASE_URL}/room/create`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ ecdhPublicKey: myEcdhPkBase64, ecdsaPublicKey: myEcdsaPkBase64 })
+				body: JSON.stringify({ publicKey: myEcdhPkBase64, nickname: nicknameInput.trim() })
 			});
 
 			const result = await res.json();
@@ -362,7 +388,7 @@
 			myNickname = nicknameInput.trim();
 			roomCode = result.data.roomCode;
 			roomId = result.data.roomId;
-			memberId = result.data.memberId;
+			memberId = createClientMemberID();
 
 			messages = [
 				{
@@ -403,8 +429,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					roomCode: roomCodeInput.trim(),
-					ecdhPublicKey: myEcdhPkBase64,
-					ecdsaPublicKey: myEcdsaPkBase64
+					publicKey: myEcdhPkBase64,
+					nickname: nicknameInput.trim()
 				})
 			});
 
@@ -416,11 +442,10 @@
 			myNickname = nicknameInput.trim();
 			roomCode = roomCodeInput.trim();
 			roomId = result.data.roomId;
-			memberId = result.data.memberId;
+			memberId = createClientMemberID();
 
-			// Kunci ECDH peer untuk enkripsi + kunci ECDSA peer untuk verifikasi tanda tangan
+			// Kunci ECDH peer untuk enkripsi
 			peerEcdhPublicKey = await importPublicKey(result.data.peerPublicKey);
-			peerEcdsaPublicKey = await importSigningPublicKey(result.data.peerSignKey);
 
 			const sharedSecret = await deriveSharedSecret(myEcdhKeyPair!.privateKey, peerEcdhPublicKey);
 			aesKey = await deriveAESKey(sharedSecret);
@@ -444,7 +469,7 @@
 		}
 	}
 
-	// Start Random Matchmaking Queue (UI Flow)
+	// Start Random Matchmaking Queue
 	async function handleStartMatchmaking() {
 		if (!nicknameInput.trim()) {
 			errorMessage = 'Nickname cannot be empty';
@@ -452,22 +477,61 @@
 		}
 		isLoading = true;
 		errorMessage = '';
+
 		try {
 			await generateKeys();
+			const myEcdhPkBase64 = await exportPublicKey(myEcdhKeyPair!.publicKey);
 			myNickname = nicknameInput.trim();
-			roomState = 'match_waiting';
+			memberId = createClientMemberID();
+
+			const res = await fetch(`${BASE_URL}/match/queue`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ publicKey: myEcdhPkBase64, nickname: myNickname })
+			});
+			const result = await res.json();
+
+			if (result.responseCode === '17' && result.data?.status === 'waiting') {
+				matchQueueId = result.data.queueId;
+				roomId = result.data.queueId;
+				roomState = 'match_waiting';
+				connectWebSocket(myEcdhPkBase64);
+				return;
+			}
+
+			if (result.responseCode === '00' && result.data?.status === 'matched') {
+				matchQueueId = '';
+				roomId = result.data.roomId;
+				await transitionToMatchedRoom(result.data.peerPublicKey, myEcdhPkBase64);
+				return;
+			}
+
+			throw new Error(result.responseMessage || 'Gagal memulai random match.');
 		} catch (err: any) {
-			errorMessage = err.message || 'Error generating key pairs, please try again.';
+			errorMessage = err.message || 'Error memulai random match, silakan coba lagi.';
 		} finally {
 			isLoading = false;
 		}
 	}
 
 	// Cancel matchmaking queue
-	function handleCancelMatchmaking() {
+	async function handleCancelMatchmaking() {
+		if (matchQueueId) {
+			try {
+				await fetch(`${BASE_URL}/match/queue/${matchQueueId}`, { method: 'DELETE' });
+			} catch (err) {
+				console.error('Error cancelling random match queue:', err);
+			}
+		}
+		matchQueueId = '';
+		if (socket) {
+			socket.close();
+			socket = null;
+		}
+
 		const params = new URLSearchParams(window.location.search);
 		if (params.get('tab') === 'match') {
-			goto('/');
+			await goto(resolve('/'));
 		} else {
 			roomState = 'setup';
 		}
@@ -514,8 +578,7 @@
 						ciphertext,
 						iv,
 						signature,
-						timestamp,
-						publicKey: myEcdsaPkBase64
+						timestamp
 					}
 				};
 
@@ -561,6 +624,7 @@
 		aesKey = null;
 		nicknameInput = '';
 		roomCodeInput = '';
+		matchQueueId = '';
 		stopTimer();
 	}
 
@@ -576,22 +640,25 @@
 		];
 	}
 
-	// Initialize scroll and timer on load
+	// Initialize view based on query tab
 	onMount(() => {
 		const params = new URLSearchParams(window.location.search);
 		const tab = params.get('tab');
 		if (tab === 'match') {
-			myNickname = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
-			generateKeys().then(() => {
-				roomState = 'match_waiting';
-			}).catch((err) => {
-				console.error(err);
-				roomState = 'match_waiting';
-			});
+			activeTab = 'match';
+			nicknameInput = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
 		} else if (tab === 'create' || tab === 'join') {
 			activeTab = tab;
 		}
+
 		scrollToBottom();
+
+		return () => {
+			stopTimer();
+			if (socket) {
+				socket.close();
+			}
+		};
 	});
 </script>
 
