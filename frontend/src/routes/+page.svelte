@@ -129,7 +129,7 @@
         </div>
         <h3>Random Match</h3>
         <p>Terhubung secara acak dengan orang lain di seluruh dunia tanpa mengenal identitas.</p>
-        <button class="btn-outline-dark full" onclick={() => triggerToast('Fitur Matchmaking Acak sedang dikembangkan untuk Sprint berikutnya!')}>Cari Teman Chat</button>
+        <button class="btn-outline-dark full" onclick={() => goto('/chatroom?tab=match')}>Cari Teman Chat</button>
       </div>
 
     </div>

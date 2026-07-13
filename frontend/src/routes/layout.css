@@ -114,3 +114,24 @@ body {
 .sidebar-transition {
 	transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* Custom matchmaking animations */
+@keyframes flow-dot {
+	0% { left: 0%; }
+	50% { left: 100%; transform: translateX(-100%); }
+	100% { left: 0%; }
+}
+.animate-flow-dot {
+	position: absolute;
+	animation: flow-dot 3s ease-in-out infinite;
+}
+
+@keyframes infinite-slide {
+	0% { left: -33.33%; }
+	100% { left: 100%; }
+}
+.animate-infinite-slide {
+	position: absolute;
+	animation: infinite-slide 1.5s linear infinite;
+}
+

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { goto } from '$app/navigation';
 	import {
 		generateKeyPair,
 		exportPublicKey,
@@ -20,8 +21,8 @@
 	const WS_BASE_URL = 'ws://localhost:8080/ws';
 
 	// roomState: set to 'setup' by default to render the real flow
-	let roomState = $state<'setup' | 'waiting' | 'chat'>('setup');
-	let activeTab = $state<'create' | 'join'>('create');
+	let roomState = $state<'setup' | 'waiting' | 'match_waiting' | 'chat'>('setup');
+	let activeTab = $state<'create' | 'join' | 'match'>('create');
 	let nicknameInput = $state('');
 	let roomCodeInput = $state('');
 	let isLoading = $state(false);
@@ -443,6 +444,35 @@
 		}
 	}
 
+	// Start Random Matchmaking Queue (UI Flow)
+	async function handleStartMatchmaking() {
+		if (!nicknameInput.trim()) {
+			errorMessage = 'Nickname cannot be empty';
+			return;
+		}
+		isLoading = true;
+		errorMessage = '';
+		try {
+			await generateKeys();
+			myNickname = nicknameInput.trim();
+			roomState = 'match_waiting';
+		} catch (err: any) {
+			errorMessage = err.message || 'Error generating key pairs, please try again.';
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	// Cancel matchmaking queue
+	function handleCancelMatchmaking() {
+		const params = new URLSearchParams(window.location.search);
+		if (params.get('tab') === 'match') {
+			goto('/');
+		} else {
+			roomState = 'setup';
+		}
+	}
+
 	// Send message handler (works locally in mock mode)
 	async function sendMessage() {
 		const text = messageInput.trim();
@@ -550,7 +580,15 @@
 	onMount(() => {
 		const params = new URLSearchParams(window.location.search);
 		const tab = params.get('tab');
-		if (tab === 'create' || tab === 'join') {
+		if (tab === 'match') {
+			myNickname = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
+			generateKeys().then(() => {
+				roomState = 'match_waiting';
+			}).catch((err) => {
+				console.error(err);
+				roomState = 'match_waiting';
+			});
+		} else if (tab === 'create' || tab === 'join') {
 			activeTab = tab;
 		}
 		scrollToBottom();
@@ -586,6 +624,12 @@
 						class="flex-1 pb-3 text-center font-medium text-sm transition-colors {activeTab === 'join' ? 'border-b-2 border-primary text-primary font-bold' : 'text-outline hover:text-on-surface'}"
 					>
 						Join Room
+					</button>
+					<button
+						onclick={() => { activeTab = 'match'; errorMessage = ''; }}
+						class="flex-1 pb-3 text-center font-medium text-sm transition-colors {activeTab === 'match' ? 'border-b-2 border-primary text-primary font-bold' : 'text-outline hover:text-on-surface'}"
+					>
+						Random Match
 					</button>
 				</div>
 
@@ -638,7 +682,7 @@
 									<span>Create Room</span>
 								{/if}
 							</button>
-						{:else}
+						{:else if activeTab === 'join'}
 							<button
 								onclick={handleJoinRoom}
 								disabled={isLoading}
@@ -652,8 +696,117 @@
 									<span>Join Room</span>
 								{/if}
 							</button>
+						{:else if activeTab === 'match'}
+							<button
+								onclick={handleStartMatchmaking}
+								disabled={isLoading}
+								class="w-full py-4 bg-primary-container text-white font-bold rounded-xl shadow-premium hover:bg-primary transition-all active:scale-[0.98] flex items-center justify-center space-x-2"
+							>
+								{#if isLoading}
+									<div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+									<span>Mencari...</span>
+								{:else}
+									<span class="material-symbols-outlined text-[20px]">shuffle</span>
+									<span>Cari Teman Chat</span>
+								{/if}
+							</button>
 						{/if}
 					</div>
+				</div>
+			</div>
+		</div>
+	{:else if roomState === 'match_waiting'}
+		<!-- RANDOM MATCH WAITING SCREEN -->
+		<div class="flex flex-col h-full bg-[#F4F6F9] text-on-background relative">
+			<!-- Header -->
+			<header class="h-16 flex-shrink-0 flex items-center justify-between px-8 border-b border-outline-variant/30 bg-white">
+				<!-- Kembali Button -->
+				<button 
+					onclick={handleCancelMatchmaking}
+					class="flex items-center space-x-2 text-sm font-bold text-outline hover:text-on-surface transition-colors cursor-pointer"
+				>
+					<span class="material-symbols-outlined text-[20px]">arrow_back</span>
+					<span class="tracking-wide uppercase font-label-mono text-xs">KEMBALI</span>
+				</button>
+
+				<!-- Title -->
+				<span class="font-bold text-lg text-primary tracking-tight font-['Space_Grotesk']">UMBRA</span>
+
+				<!-- Status Badge -->
+				<div class="flex items-center space-x-2 bg-[#E6F4EA] text-[#137333] px-3.5 py-1.5 rounded-full text-xs font-semibold select-none">
+					<span class="w-1.5 h-1.5 rounded-full bg-[#137333]"></span>
+					<span class="font-label-mono text-[11px] uppercase tracking-wider font-bold">E2EE Ready</span>
+				</div>
+			</header>
+
+			<!-- Main Content Area -->
+			<div class="flex-grow flex flex-col items-center justify-center p-6 max-w-lg mx-auto w-full text-center space-y-12">
+				<!-- Avatars & Line Connection -->
+				<div class="flex items-center justify-between w-full max-w-sm relative">
+					<!-- Connection Line -->
+					<div class="absolute left-16 right-16 top-1/2 -translate-y-1/2 h-[2px] bg-gray-200">
+						<!-- Glowing Dot Animation -->
+						<div class="absolute top-0 bottom-0 w-4 bg-[#00aeef] rounded-full animate-flow-dot"></div>
+					</div>
+
+					<!-- Left Avatar (ANDA) -->
+					<div class="flex flex-col items-center space-y-3 z-10">
+						<div class="w-20 h-20 rounded-full border-4 border-[#00aeef] bg-primary flex items-center justify-center text-white font-bold text-2xl shadow-premium ring-4 ring-[#00aeef]/20 select-none">
+							{myInitials}
+						</div>
+						<span class="text-xs font-bold text-[#00aeef] tracking-widest uppercase font-label-mono">ANDA</span>
+					</div>
+
+					<!-- Right Avatar (MENCARI) -->
+					<div class="flex flex-col items-center space-y-3 z-10">
+						<div class="w-20 h-20 rounded-full bg-gray-200 border-4 border-white flex items-center justify-center text-gray-400 font-bold text-3xl shadow-sm animate-pulse select-none">
+							?
+						</div>
+						<span class="text-xs font-bold text-gray-400 tracking-widest uppercase font-label-mono">MENCARI...</span>
+					</div>
+				</div>
+
+				<!-- Message -->
+				<div class="space-y-3">
+					<h3 class="text-xl font-bold text-on-surface">Mencari lawan bicara...</h3>
+					<p class="text-sm text-outline leading-relaxed">
+						Sistem kami sedang mengenkripsi jalur komunikasi<br />untuk sesi anonim Anda.
+					</p>
+				</div>
+
+				<!-- Infinite Loader Line -->
+				<div class="w-full max-w-sm h-1.5 bg-gray-200/60 rounded-full overflow-hidden relative">
+					<div class="absolute top-0 bottom-0 bg-gradient-to-r from-[#00aeef] to-[#00658d] w-1/3 rounded-full animate-infinite-slide"></div>
+				</div>
+
+				<!-- Stats Banner -->
+				<div class="w-full bg-[#0F3460] text-white py-3.5 px-6 rounded-2xl flex items-center justify-between text-xs font-semibold shadow-premium font-label-mono select-none">
+					<div class="flex items-center space-x-2 relative">
+						<span class="w-2 h-2 rounded-full bg-[#10B981] animate-ping"></span>
+						<span class="w-2 h-2 rounded-full bg-[#10B981] absolute"></span>
+						<span class="pl-3">1.240 pengguna online</span>
+					</div>
+					<span class="opacity-30">|</span>
+					<div class="flex items-center space-x-2">
+						<span class="w-2.5 h-2.5 rounded-full bg-[#00aeef]"></span>
+						<span>Enkripsi aktif</span>
+					</div>
+					<span class="opacity-30">|</span>
+					<div class="flex items-center space-x-1.5">
+						<span class="material-symbols-outlined text-[16px]">timer</span>
+						<span>&lt; 30 detik</span>
+					</div>
+				</div>
+
+				<!-- Cancel Button -->
+				<div class="space-y-4 pt-4">
+					<button 
+						onclick={handleCancelMatchmaking}
+						class="px-10 py-4 bg-[#0A6C8B] text-white font-bold rounded-xl shadow-premium hover:bg-[#085A75] hover:shadow-lg transition-all active:scale-[0.98] text-sm uppercase tracking-wider cursor-pointer"
+					>
+						Batalkan pencarian
+					</button>
+					<p class="text-[10px] font-bold text-outline tracking-widest font-label-mono">EST. WAIT: &lt; 30S</p>
 				</div>
 			</div>
 		</div>
