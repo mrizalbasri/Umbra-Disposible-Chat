@@ -343,7 +343,7 @@
 
 	// Encrypted Handshake over WebSocket
 	async function sendHandshake() {
-		if (!aesKey || !myEcdsaKeyPair) return;
+		if (!aesKey || !myEcdsaKeyPair || !socket) return;
 
 		const payload = {
 			type: 'handshake',
@@ -370,7 +370,14 @@
 			}
 		};
 
-		socket?.send(JSON.stringify(msg));
+		const s = socket;
+		if (s.readyState === WebSocket.OPEN) {
+			s.send(JSON.stringify(msg));
+		} else if (s.readyState === WebSocket.CONNECTING) {
+			s.addEventListener('open', () => {
+				s.send(JSON.stringify(msg));
+			}, { once: true });
+		}
 	}
 
 	// Call POST /v1/api/room/create (deferred hook)
@@ -675,86 +682,13 @@
 			aesKey = session.aesKey;
 			myNickname = session.myNickname;
 			memberId = session.memberId;
-			socket = session.socket;
 			roomState = 'chat';
 
-			// Bind WebSocket listener for chat state
-			if (socket) {
-				socket.onmessage = async (event) => {
-					try {
-						const data = JSON.parse(event.data);
-						if (data.roomId && data.roomId !== roomId) return;
+			// Connect to WebSocket using the unified flow
+			exportPublicKey(myEcdhKeyPair!.publicKey).then((myEcdhPkBase64) => {
+				connectWebSocket(myEcdhPkBase64);
+			});
 
-						if (data.event === 'error') {
-							if (data.code === 16 || data.payload?.code === 16) {
-								toastMessage = 'Security Alert: Tanda tangan pesan tidak valid (ECDSA Verify Failed)!';
-								showToast = true;
-								setTimeout(() => {
-									showToast = false;
-								}, 4000);
-							}
-							return;
-						}
-
-						if (data.event === 'new_message') {
-							if (data.senderMemberId === memberId) return;
-							const { ciphertext, iv, signature, timestamp } = data.payload;
-							if (!aesKey) return;
-
-							const decryptedText = await decrypt(ciphertext, iv, aesKey);
-							const decryptedObj = JSON.parse(decryptedText);
-
-							if (decryptedObj.type === 'handshake') {
-								peerEcdsaPublicKey = await importSigningPublicKey(decryptedObj.signingPublicKey);
-								partnerNickname = decryptedObj.nickname;
-								messages = [
-									...messages,
-									{
-										id: Date.now().toString(),
-										type: 'system',
-										text: `${decryptedObj.nickname} joined the session.`,
-										boxed: true
-									}
-								];
-								await tick();
-								scrollToBottom();
-							} else if (decryptedObj.type === 'chat') {
-								if (peerEcdsaPublicKey) {
-									const msgData = new TextEncoder().encode(ciphertext + iv + timestamp);
-									const isValid = await verify(msgData.buffer, signature, peerEcdsaPublicKey);
-									if (!isValid) {
-										console.error('ECDSA signature verification failed! Message untrusted.');
-										return;
-									}
-								}
-
-								const dateObj = new Date(timestamp);
-								const hours = dateObj.getHours();
-								const minutes = dateObj.getMinutes();
-								const ampm = hours >= 12 ? 'PM' : 'AM';
-								const timeString = `${hours % 12 || 12}:${minutes.toString().padStart(2, '0')} ${ampm}`;
-
-								messages = [
-									...messages,
-									{
-										id: Date.now().toString(),
-										type: 'partner',
-										sender: decryptedObj.nickname.substring(0, 2).toUpperCase(),
-										text: decryptedObj.text,
-										time: timeString
-									}
-								];
-								await tick();
-								scrollToBottom();
-							}
-						}
-					} catch (err) {
-						console.error('Error handling WS msg in chatroom:', err);
-					}
-				};
-			}
-
-			sendHandshake();
 			messages = [
 				{
 					id: 'init-sys',

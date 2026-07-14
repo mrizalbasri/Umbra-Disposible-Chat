@@ -12,9 +12,12 @@
     exportSigningPublicKey
   } from '$lib/crypto';
 
-  // API and WS Configuration
-  const BASE_URL = 'http://localhost:8080/v1/api';
-  const WS_BASE_URL = 'ws://localhost:8080/ws';
+  import { env } from '$env/dynamic/public';
+
+  // API and WS Configuration (dynamic with fallback to localhost)
+  const BACKEND_HOST = env.PUBLIC_BACKEND_URL || 'http://localhost:8080';
+  const BASE_URL = `${BACKEND_HOST}/v1/api`;
+  const WS_BASE_URL = `${BACKEND_HOST.replace(/^http/, 'ws')}/ws`;
 
   let myNickname = 'Guest_User';
   let myEcdhKeyPair: CryptoKeyPair | null = null;
@@ -80,6 +83,10 @@
           const sharedSecret = await deriveSharedSecret(myEcdhKeyPair!.privateKey, peerEcdhPublicKey);
           aesKey = await deriveAESKey(sharedSecret);
 
+          if (socket) {
+            socket.close();
+          }
+
           // Save active session to shared store and route to chatroom
           activeSession.set({
             roomId,
@@ -91,7 +98,7 @@
             myNickname,
             partnerNickname: '',
             memberId,
-            socket
+            socket: null
           });
 
           goto(resolve('/chatroom'));
@@ -131,10 +138,6 @@
         const sharedSecret = await deriveSharedSecret(myEcdhKeyPair!.privateKey, peerEcdhPublicKey);
         aesKey = await deriveAESKey(sharedSecret);
 
-        // Pre-connect WebSocket for the matched room
-        const matchedWsUrl = `${WS_BASE_URL}?roomId=${roomId}&publicKey=${encodeURIComponent(myEcdhPkBase64)}`;
-        socket = new WebSocket(matchedWsUrl);
-
         activeSession.set({
           roomId,
           myEcdhKeyPair,
@@ -145,7 +148,7 @@
           myNickname,
           partnerNickname: '',
           memberId,
-          socket
+          socket: null
         });
 
         goto(resolve('/chatroom'));
