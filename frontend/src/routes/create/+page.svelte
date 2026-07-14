@@ -94,7 +94,7 @@
       </button>
 
       <div class="join-link">
-        Join ke room teman ? <a href="/join">Klik Disini</a>
+        Join ke room teman ? <a href="/join" class="nama-class-css-kamu">Klik disini</a>
       </div>
     </div>
   </main>
