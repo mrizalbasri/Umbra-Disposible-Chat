@@ -35,7 +35,7 @@
 		</div>
 		<div class="nav-right">
 			<span class="lang">ID/EN</span>
-			<button class="btn-start" onclick={() => goto('/chatroom?tab=create')}>Mulai</button>
+			<button class="btn-start" onclick={() => goto('/create')}>Mulai</button>
 		</div>
 	</nav>
 
@@ -69,7 +69,7 @@
 					pelacakan, dan data Anda hilang seketika setelah selesai.
 				</p>
 				<div class="hero-buttons">
-					<button class="btn-primary" onclick={() => goto('/chatroom')}
+					<button class="btn-primary" onclick={() => goto('/create')}
 						>Mulai Chat Sekarang →</button
 					>
 					<button
@@ -184,7 +184,7 @@
 				</div>
 				<h3>Private Room</h3>
 				<p>Buat ruang obrolan eksklusif dan bagikan kode rahasia kepada partner bicara Anda.</p>
-				<button class="btn-dark-teal full" onclick={() => goto('/chatroom?tab=create')}
+				<button class="btn-dark-teal full" onclick={() => goto('/create')}
 					>Buat Ruangan</button
 				>
 			</div>

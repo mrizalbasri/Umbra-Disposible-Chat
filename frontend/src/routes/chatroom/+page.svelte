@@ -17,9 +17,12 @@
 		verify
 	} from '$lib/crypto';
 
-	// API and WS Configuration (for future integration)
-	const BASE_URL = 'http://localhost:8080/v1/api';
-	const WS_BASE_URL = 'ws://localhost:8080/ws';
+	import { env } from '$env/dynamic/public';
+
+	// API and WS Configuration (dynamic with fallback to localhost)
+	const BACKEND_HOST = env.PUBLIC_BACKEND_URL || 'http://localhost:8080';
+	const BASE_URL = `${BACKEND_HOST}/v1/api`;
+	const WS_BASE_URL = `${BACKEND_HOST.replace(/^http/, 'ws')}/ws`;
 
 	// roomState: set to 'setup' by default to render the real flow
 	let roomState = $state<'setup' | 'waiting' | 'match_waiting' | 'chat'>('setup');
@@ -35,15 +38,19 @@
 	let searchQuery = $state('');
 	let showMoreMenu = $state(false);
 
-	// Session variables (initialized to mockup values)
-	let myNickname = $state('Neon_Specter');
-	let roomCode = $state('UX-882-KLA');
-	let roomId = $state('550e8400-e29b-41d4-a716-446655440421');
-	let memberId = $state('my-member-id');
+	// Session variables
+	let myNickname = $state('');
+	let roomCode = $state('');
+	let roomId = $state('');
+	let memberId = $state('');
+	let partnerNickname = $state('');
 
 	// Deriving user initials dynamically
 	let myInitials = $derived(
-		myNickname === 'Neon_Specter' ? 'ME' : myNickname.slice(0, 2).toUpperCase()
+		myNickname ? myNickname.slice(0, 2).toUpperCase() : 'ME'
+	);
+	let partnerInitials = $derived(
+		partnerNickname ? partnerNickname.slice(0, 2).toUpperCase() : '..'
 	);
 
 	// Cryptographic keys
@@ -61,47 +68,13 @@
 	let showToast = $state(false);
 	let toastMessage = $state('');
 
-	// Initial mockup messages exactly matching the screenshot
+	// Initial clean messages array
 	let messages = $state<any[]>([
 		{
 			id: 'm1',
 			type: 'system',
 			text: 'Session established. Messages will self-destruct on disconnect.',
 			boxed: true
-		},
-		{
-			id: 'm2',
-			type: 'partner',
-			sender: 'JS',
-			text: 'Data integrity checks complete. Are we ready to initiate the transfer?',
-			time: '10:42 AM'
-		},
-		{
-			id: 'm3',
-			type: 'system',
-			text: 'Cipher updated by system.',
-			boxed: false
-		},
-		{
-			id: 'm4',
-			type: 'self',
-			sender: 'ME',
-			text: 'Confirming. The keys have been rotated and I am monitoring the egress points now.',
-			time: '10:43 AM'
-		},
-		{
-			id: 'm5',
-			type: 'partner',
-			sender: 'JS',
-			text: 'Understood. Initiating in T-minus 60 seconds. Keep the tunnel open.',
-			time: '10:45 AM'
-		},
-		{
-			id: 'm6',
-			type: 'self',
-			sender: 'ME',
-			text: 'Monitoring heartbeat...',
-			time: '10:45 AM'
 		}
 	]);
 
@@ -298,7 +271,7 @@
 
 					if (decryptedObj.type === 'handshake') {
 						peerEcdsaPublicKey = await importSigningPublicKey(decryptedObj.signingPublicKey);
-
+						partnerNickname = decryptedObj.nickname; // ponytail: store partner name dynamically
 						messages = [
 							...messages,
 							{
@@ -437,9 +410,11 @@
 			];
 
 			roomState = 'waiting';
+			window.history.replaceState({}, '', '/chatroom'); // ponytail: clear url params
 			connectWebSocket(myEcdhPkBase64);
 		} catch (err: any) {
-			errorMessage = err.message || 'Network error, please start/check the backend server.';
+			const errMsg = err.message || 'Network error, please start/check the backend server.';
+			goto(`/create?error=${encodeURIComponent(errMsg)}`);
 		} finally {
 			isLoading = false;
 		}
@@ -497,10 +472,12 @@
 			];
 
 			roomState = 'chat';
+			window.history.replaceState({}, '', '/chatroom'); // ponytail: clear url params
 			startTimer();
 			connectWebSocket(myEcdhPkBase64);
 		} catch (err: any) {
-			errorMessage = err.message || 'Network error, please start/check the backend server.';
+			const errMsg = err.message || 'Network error, please start/check the backend server.';
+			goto(`/join?error=${encodeURIComponent(errMsg)}`);
 		} finally {
 			isLoading = false;
 		}
@@ -532,6 +509,7 @@
 				matchQueueId = result.data.queueId;
 				roomId = result.data.queueId;
 				roomState = 'match_waiting';
+				window.history.replaceState({}, '', '/chatroom'); // ponytail: clear url params
 				connectWebSocket(myEcdhPkBase64);
 				return;
 			}
@@ -539,13 +517,15 @@
 			if (result.responseCode === '00' && result.data?.status === 'matched') {
 				matchQueueId = '';
 				roomId = result.data.roomId;
+				window.history.replaceState({}, '', '/chatroom'); // ponytail: clear url params
 				await transitionToMatchedRoom(result.data.peerPublicKey, myEcdhPkBase64);
 				return;
 			}
 
 			throw new Error(result.responseMessage || 'Gagal memulai random match.');
 		} catch (err: any) {
-			errorMessage = err.message || 'Error memulai random match, silakan coba lagi.';
+			const errMsg = err.message || 'Error memulai random match, silakan coba lagi.';
+			goto(`/?error=${encodeURIComponent(errMsg)}`);
 		} finally {
 			isLoading = false;
 		}
@@ -663,6 +643,7 @@
 		roomCodeInput = '';
 		matchQueueId = '';
 		stopTimer();
+		goto('/'); // ponytail: redirect to home to reset query params
 	}
 
 	// Reset messages (used for Clear Chat in dropdown)
@@ -684,8 +665,23 @@
 		if (tab === 'match') {
 			activeTab = 'match';
 			nicknameInput = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
-		} else if (tab === 'create' || tab === 'join') {
-			activeTab = tab;
+			handleStartMatchmaking(); // ponytail: bypass nickname form and start match directly
+		} else if (tab === 'create') {
+			activeTab = 'create';
+			const nickname = params.get('nickname');
+			if (nickname) {
+				nicknameInput = nickname;
+				handleCreateRoom(); // ponytail: auto-create room if redirected from /create
+			}
+		} else if (tab === 'join') {
+			activeTab = 'join';
+			const roomCode = params.get('roomCode');
+			const nickname = params.get('nickname');
+			if (roomCode && nickname) {
+				roomCodeInput = roomCode;
+				nicknameInput = nickname;
+				handleJoinRoom(); // ponytail: auto-join room if redirected from /join
+			}
 		}
 
 		scrollToBottom();
@@ -701,158 +697,10 @@
 
 <div class="h-screen bg-background select-none">
 	{#if roomState === 'setup'}
-		<!-- SETUP WELCOME SCREEN -->
-		<div class="flex items-center justify-center h-full p-6">
-			<div
-				class="w-full max-w-md bg-white rounded-2xl shadow-premium border border-outline-variant/30 overflow-hidden flex flex-col p-6 space-y-6"
-			>
-				<!-- Brand -->
-				<div class="flex items-center space-x-3 justify-center">
-					<img src="/logo.webp" alt="UMBRA Logo" class="w-12 h-12 object-contain rounded-xl" />
-					<span class="font-headline-md text-2xl font-bold text-primary tracking-tight">UMBRA</span>
-				</div>
-
-				<div class="text-center space-y-1">
-					<h3 class="text-on-surface font-semibold text-lg">Secure Ephemeral Session</h3>
-					<p class="text-sm text-outline">End-to-End Encrypted & Zero-Persistence</p>
-				</div>
-
-				<!-- Setup Tabs -->
-				<div class="flex border-b border-outline-variant/20">
-					<button
-						onclick={() => {
-							activeTab = 'create';
-							errorMessage = '';
-						}}
-						class="flex-1 pb-3 text-center font-medium text-sm transition-colors {activeTab ===
-						'create'
-							? 'border-b-2 border-primary text-primary font-bold'
-							: 'text-outline hover:text-on-surface'}"
-					>
-						Create Room
-					</button>
-					<button
-						onclick={() => {
-							activeTab = 'join';
-							errorMessage = '';
-						}}
-						class="flex-1 pb-3 text-center font-medium text-sm transition-colors {activeTab ===
-						'join'
-							? 'border-b-2 border-primary text-primary font-bold'
-							: 'text-outline hover:text-on-surface'}"
-					>
-						Join Room
-					</button>
-					<button
-						onclick={() => {
-							activeTab = 'match';
-							errorMessage = '';
-						}}
-						class="flex-1 pb-3 text-center font-medium text-sm transition-colors {activeTab ===
-						'match'
-							? 'border-b-2 border-primary text-primary font-bold'
-							: 'text-outline hover:text-on-surface'}"
-					>
-						Random Match
-					</button>
-				</div>
-
-				<!-- Input Form -->
-				<div class="space-y-4 pt-2">
-					{#if errorMessage}
-						<div
-							class="p-3 bg-error-container text-on-error-container rounded-xl text-sm border border-error/20"
-						>
-							{errorMessage}
-						</div>
-					{/if}
-
-					<div class="flex flex-col space-y-2">
-						<label
-							for="nickname"
-							class="font-label-mono text-sm text-outline uppercase tracking-widest">Nickname</label
-						>
-						<input
-							type="text"
-							id="nickname"
-							bind:value={nicknameInput}
-							placeholder="e.g. Neon_Specter"
-							disabled={isLoading}
-							class="bg-surface-container-low border border-outline-variant/30 rounded-xl p-3 text-on-surface focus:outline-none focus:border-primary-container focus:ring-4 focus:ring-primary-container/10 transition-all font-body-md"
-						/>
-					</div>
-
-					{#if activeTab === 'join'}
-						<div class="flex flex-col space-y-2">
-							<label
-								for="room-code-input"
-								class="font-label-mono text-sm text-outline uppercase tracking-widest"
-								>Room Code</label
-							>
-							<input
-								type="text"
-								id="room-code-input"
-								placeholder="XXXX-XX"
-								disabled={isLoading}
-								oninput={handleRoomCodeInput}
-								class="bg-surface-container-low border border-outline-variant/30 rounded-xl p-3 text-primary font-label-mono font-bold tracking-widest focus:outline-none focus:border-primary-container focus:ring-4 focus:ring-primary-container/10 transition-all text-center"
-							/>
-						</div>
-					{/if}
-
-					<div class="pt-2">
-						{#if activeTab === 'create'}
-							<button
-								onclick={handleCreateRoom}
-								disabled={isLoading}
-								class="w-full py-4 bg-primary-container text-white font-bold rounded-xl shadow-premium hover:bg-primary transition-all active:scale-[0.98] flex items-center justify-center space-x-2"
-							>
-								{#if isLoading}
-									<div
-										class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
-									></div>
-									<span>Generating Room...</span>
-								{:else}
-									<span class="material-symbols-outlined text-[20px]">add_circle</span>
-									<span>Create Room</span>
-								{/if}
-							</button>
-						{:else if activeTab === 'join'}
-							<button
-								onclick={handleJoinRoom}
-								disabled={isLoading}
-								class="w-full py-4 bg-primary-container text-white font-bold rounded-xl shadow-premium hover:bg-primary transition-all active:scale-[0.98] flex items-center justify-center space-x-2"
-							>
-								{#if isLoading}
-									<div
-										class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
-									></div>
-									<span>Connecting...</span>
-								{:else}
-									<span class="material-symbols-outlined text-[20px]">login</span>
-									<span>Join Room</span>
-								{/if}
-							</button>
-						{:else if activeTab === 'match'}
-							<button
-								onclick={handleStartMatchmaking}
-								disabled={isLoading}
-								class="w-full py-4 bg-primary-container text-white font-bold rounded-xl shadow-premium hover:bg-primary transition-all active:scale-[0.98] flex items-center justify-center space-x-2"
-							>
-								{#if isLoading}
-									<div
-										class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
-									></div>
-									<span>Mencari...</span>
-								{:else}
-									<span class="material-symbols-outlined text-[20px]">shuffle</span>
-									<span>Cari Teman Chat</span>
-								{/if}
-							</button>
-						{/if}
-					</div>
-				</div>
-			</div>
+		<!-- INITIALIZING SECURITY / REDIRECTING SCREEN -->
+		<div class="flex flex-col items-center justify-center h-full space-y-4 bg-white">
+			<div class="w-10 h-10 border-4 border-[#00aeef] border-t-transparent rounded-full animate-spin"></div>
+			<p class="text-sm font-label-mono text-outline uppercase tracking-wider">Inisialisasi Keamanan...</p>
 		</div>
 	{:else if roomState === 'match_waiting'}
 		<!-- RANDOM MATCH WAITING SCREEN -->
@@ -861,19 +709,15 @@
 			<header
 				class="h-16 flex-shrink-0 flex items-center justify-between px-8 border-b border-outline-variant/30 bg-white"
 			>
-				<!-- Kembali Button -->
-				<button
-					onclick={handleCancelMatchmaking}
-					class="flex items-center space-x-2 text-sm font-bold text-outline hover:text-on-surface transition-colors cursor-pointer"
-				>
-					<span class="material-symbols-outlined text-[20px]">arrow_back</span>
-					<span class="tracking-wide uppercase font-label-mono text-xs">KEMBALI</span>
-				</button>
-
-				<!-- Title -->
-				<span class="font-bold text-lg text-primary tracking-tight font-['Space_Grotesk']"
-					>UMBRA</span
-				>
+				<!-- Title (No Back Button in Figma Header) -->
+				<div class="flex items-center space-x-2">
+					<svg xmlns="http://www.w3.org/2000/svg" width="16" height="20" viewBox="0 0 16 20" fill="none">
+						<path d="M8 20C5.68333 19.4167 3.77083 18.0875 2.2625 16.0125C0.754167 13.9375 0 11.6333 0 9.1V3L8 0L16 3V9.1C16 11.6333 15.2458 13.9375 13.7375 16.0125C12.2292 18.0875 10.3167 19.4167 8 20ZM8 17.9C9.61667 17.4 10.9667 16.4125 12.05 14.9375C13.1333 13.4625 13.7667 11.8167 13.95 10H8V2.125L2 4.375V9.1C2 9.28333 2 9.43333 2 9.55C2 9.66667 2.01667 9.81667 2.05 10H8V17.9Z" fill="#00AEEF"/>
+					</svg>
+					<span class="font-bold text-lg text-[#00658D] tracking-tight font-['Space_Grotesk']"
+						>UMBRA</span
+					>
+				</div>
 
 				<!-- Status Badge -->
 				<div
@@ -894,7 +738,7 @@
 				<div class="flex items-center justify-between w-full max-w-sm relative">
 					<!-- Connection Line -->
 					<div class="absolute left-16 right-16 top-1/2 -translate-y-1/2 h-[2px] bg-gray-200">
-						<!-- Glowing Dot Animation -->
+						<!-- Glowing Dot Flow Animation -->
 						<div
 							class="absolute top-0 bottom-0 w-4 bg-[#00aeef] rounded-full animate-flow-dot"
 						></div>
@@ -903,9 +747,15 @@
 					<!-- Left Avatar (ANDA) -->
 					<div class="flex flex-col items-center space-y-3 z-10">
 						<div
-							class="w-20 h-20 rounded-full border-4 border-[#00aeef] bg-primary flex items-center justify-center text-white font-bold text-2xl shadow-premium ring-4 ring-[#00aeef]/20 select-none"
+							class="w-20 h-20 rounded-full border-4 border-[#00aeef] bg-white flex items-center justify-center shadow-premium relative select-none"
 						>
-							{myInitials}
+							<!-- Stylized Profile Avatar SVG -->
+							<svg class="w-10 h-10 text-[#00658D]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke-linecap="round" stroke-linejoin="round"></path>
+								<circle cx="12" cy="7" r="4" stroke-linecap="round" stroke-linejoin="round"></circle>
+							</svg>
+							<!-- Blue connector dot on the right edge -->
+							<div class="absolute right-[-6px] top-[calc(50%-4px)] w-2.5 h-2.5 rounded-full bg-[#00aeef]"></div>
 						</div>
 						<span class="text-xs font-bold text-[#00aeef] tracking-widest uppercase font-label-mono"
 							>ANDA</span
@@ -915,7 +765,7 @@
 					<!-- Right Avatar (MENCARI) -->
 					<div class="flex flex-col items-center space-y-3 z-10">
 						<div
-							class="w-20 h-20 rounded-full bg-gray-200 border-4 border-white flex items-center justify-center text-gray-400 font-bold text-3xl shadow-sm animate-pulse select-none"
+							class="w-20 h-20 rounded-full bg-[#F1F5F9] border-4 border-white flex items-center justify-center text-gray-400 font-bold text-3xl shadow-sm animate-pulse select-none"
 						>
 							?
 						</div>
@@ -940,23 +790,22 @@
 					></div>
 				</div>
 
-				<!-- Stats Banner -->
+				<!-- Stats Banner (Figma Capsule style) -->
 				<div
-					class="w-full bg-[#0F3460] text-white py-3.5 px-6 rounded-2xl flex items-center justify-between text-xs font-semibold shadow-premium font-label-mono select-none"
+					class="w-full bg-[#0F1C2C] text-[#CBD5E1] py-3.5 px-6 rounded-full flex items-center justify-between text-[11px] font-bold shadow-premium font-label-mono select-none"
 				>
-					<div class="flex items-center space-x-2 relative">
-						<span class="w-2 h-2 rounded-full bg-[#10B981] animate-ping"></span>
-						<span class="w-2 h-2 rounded-full bg-[#10B981] absolute"></span>
-						<span class="pl-3">1.240 pengguna online</span>
+					<div class="flex items-center space-x-2">
+						<span class="w-2 h-2 rounded-full bg-[#10B981]"></span>
+						<span>1.240 pengguna online</span>
 					</div>
-					<span class="opacity-30">|</span>
+					<span class="opacity-30">||</span>
 					<div class="flex items-center space-x-2">
 						<span class="w-2.5 h-2.5 rounded-full bg-[#00aeef]"></span>
 						<span>Enkripsi aktif</span>
 					</div>
-					<span class="opacity-30">|</span>
+					<span class="opacity-30">||</span>
 					<div class="flex items-center space-x-1.5">
-						<span class="material-symbols-outlined text-[16px]">timer</span>
+						<span class="material-symbols-outlined text-[16px] text-[#EF4444] leading-none">timer</span>
 						<span>&lt; 30 detik</span>
 					</div>
 				</div>
@@ -969,7 +818,7 @@
 					>
 						Batalkan pencarian
 					</button>
-					<p class="text-[10px] font-bold text-outline tracking-widest font-label-mono">
+					<p class="text-[10px] font-bold text-outline tracking-widest font-label-mono uppercase">
 						EST. WAIT: &lt; 30S
 					</p>
 				</div>
@@ -1094,13 +943,13 @@
 								<div
 									class="w-8 h-8 rounded-full border-2 border-white bg-tertiary-fixed flex items-center justify-center text-[10px] font-bold text-on-tertiary-fixed-variant select-none"
 								>
-									JS
+									{partnerInitials}
 								</div>
 							{/if}
 						</div>
 						<h2 class="font-bold text-lg text-on-surface font-['Space_Grotesk']">
 							Anonymous Session <span class="text-outline-variant ml-2 font-normal font-sans"
-								>#421</span
+								>#{roomId ? roomId.slice(0, 4).toUpperCase() : '...'}</span
 							>
 						</h2>
 					</div>

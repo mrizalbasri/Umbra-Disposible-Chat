@@ -1,5 +1,53 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
+
+  let otp = $state(['', '', '', '', '', '']);
+  let nickname = $state('');
+  let errorMessage = $state('');
+
+  onMount(() => {
+    const params = new URLSearchParams(window.location.search);
+    errorMessage = params.get('error') || '';
+  });
+
+  function handleInput(index: number, event: Event) {
+    const target = event.target as HTMLInputElement;
+    let val = target.value.toUpperCase();
+    
+    // Accept only alphanumeric
+    if (!/^[A-Z0-9]$/.test(val)) {
+      val = '';
+    }
+    
+    otp[index] = val;
+    target.value = val;
+
+    if (val && index < 5) {
+      const inputs = document.querySelectorAll('.otp-box');
+      if (inputs[index + 1]) {
+        (inputs[index + 1] as HTMLInputElement).focus();
+      }
+    }
+  }
+
+  function handleKeyDown(index: number, event: KeyboardEvent) {
+    const target = event.target as HTMLInputElement;
+    if (event.key === 'Backspace' && !otp[index] && index > 0) {
+      const inputs = document.querySelectorAll('.otp-box');
+      if (inputs[index - 1]) {
+        const prevInput = inputs[index - 1] as HTMLInputElement;
+        prevInput.focus();
+      }
+    }
+  }
+
+  function handleJoin() {
+    const code = (otp.slice(0, 4).join('') + '-' + otp.slice(4, 6).join('')).toUpperCase();
+    const finalNickname = nickname.trim() || `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
+    if (code.length !== 7) return; // Must be XXXX-XX format (7 chars)
+    goto(`/chatroom?tab=join&roomCode=${encodeURIComponent(code)}&nickname=${encodeURIComponent(finalNickname)}`);
+  }
 </script>
 
 <svelte:head>
@@ -16,17 +64,6 @@
         <span class="brand-divider">|</span>
         <span class="brand-gray">PROTOCOL</span>
       </div>
-    </div>
-    
-    <div class="nav-center">
-      <a href="#features">Features</a>
-      <a href="#security">Security</a>
-      <a href="#docs">Documentation</a>
-    </div>
-
-    <div class="nav-right">
-      <span class="lang-toggle">ID/EN</span>
-      <button class="btn-start">Start</button>
     </div>
   </nav>
 
@@ -73,7 +110,7 @@
       </div>
 
       <div class="sidebar-bottom">
-        <button class="btn-end" on:click={() => goto('/')}>
+        <button class="btn-end" onclick={() => goto('/')}>
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
           End Session
         </button>
@@ -92,16 +129,22 @@
           <p>Masukkan kode akses 6 digit untuk bergabung ke dalam sesi enkripsi end-to-end yang aman.</p>
         </div>
 
+        {#if errorMessage}
+          <div class="error-box">
+            {errorMessage}
+          </div>
+        {/if}
+
         <!-- KODE ROOM (OTP Boxes) -->
         <div class="input-group">
           <label>KODE ROOM</label>
           <div class="otp-container">
-            <input type="text" maxlength="1" class="otp-box" />
-            <input type="text" maxlength="1" class="otp-box" />
-            <input type="text" maxlength="1" class="otp-box" />
-            <input type="text" maxlength="1" class="otp-box" />
-            <input type="text" maxlength="1" class="otp-box" />
-            <input type="text" maxlength="1" class="otp-box" />
+            <input type="text" maxlength="1" class="otp-box" oninput={(e) => handleInput(0, e)} onkeydown={(e) => handleKeyDown(0, e)} value={otp[0]} />
+            <input type="text" maxlength="1" class="otp-box" oninput={(e) => handleInput(1, e)} onkeydown={(e) => handleKeyDown(1, e)} value={otp[1]} />
+            <input type="text" maxlength="1" class="otp-box" oninput={(e) => handleInput(2, e)} onkeydown={(e) => handleKeyDown(2, e)} value={otp[2]} />
+            <input type="text" maxlength="1" class="otp-box" oninput={(e) => handleInput(3, e)} onkeydown={(e) => handleKeyDown(3, e)} value={otp[3]} />
+            <input type="text" maxlength="1" class="otp-box" oninput={(e) => handleInput(4, e)} onkeydown={(e) => handleKeyDown(4, e)} value={otp[4]} />
+            <input type="text" maxlength="1" class="otp-box" oninput={(e) => handleInput(5, e)} onkeydown={(e) => handleKeyDown(5, e)} value={otp[5]} />
           </div>
         </div>
 
@@ -110,11 +153,11 @@
           <label>NAMA SAMARAN (OPSIONAL)</label>
           <div class="input-wrapper">
             <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-            <input type="text" placeholder="Contoh: Ghost_99" />
+            <input type="text" placeholder="Contoh: Ghost_99" bind:value={nickname} />
           </div>
         </div>
 
-        <button class="btn-join" on:click={() => goto('/chatroom')}>
+        <button class="btn-join" onclick={handleJoin}>
           Gabung Room 
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
         </button>
@@ -333,13 +376,14 @@
     display: flex;
     justify-content: center;
     align-items: center;
-    background: #FFFFFF;
+    background: #F8FAFC;
     position: relative;
   }
 
   .form-card {
     background: #FFFFFF;
     border: 1px solid #E2E8F0;
+    border-left: 4px solid #00658D;
     border-radius: 16px;
     padding: 48px;
     width: 100%;
@@ -455,5 +499,18 @@
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.5px;
+  }
+
+  .error-box {
+    background: #FEE2E2;
+    border: 1px solid #FCA5A5;
+    color: #DC2626;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 24px;
+    text-align: center;
+    font-weight: 500;
+    font-family: 'Inter', sans-serif;
   }
 </style>
