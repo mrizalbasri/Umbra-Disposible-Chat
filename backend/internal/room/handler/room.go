@@ -154,8 +154,8 @@ func JoinRoom(c *fiber.Ctx) error {
 	if !exists {
 		return fail(c, 404, "11", "Room tidak ditemukan") // Sesuai Error Code 11
 	}
-	if len(room.Members) >= 2 {
-		return fail(c, 409, "14", "Room sudah penuh (maksimal 2 anggota)") // Sesuai Error Code 14
+	if len(room.Members) >= 5 {
+		return fail(c, 409, "14", "Room sudah penuh (maksimal 5 anggota)") // Sesuai Error Code 14
 	}
 
 	// Ambil data publicKey milik user pertama (peer) untuk proses key exchange
