@@ -18,6 +18,7 @@
 	} from '$lib/crypto';
 
 	import { env } from '$env/dynamic/public';
+	import { activeSession } from '$lib/sessionStore';
 
 	// API and WS Configuration (dynamic with fallback to localhost)
 	const BACKEND_HOST = env.PUBLIC_BACKEND_URL || 'http://localhost:8080';
@@ -660,27 +661,133 @@
 
 	// Initialize view based on query tab
 	onMount(() => {
-		const params = new URLSearchParams(window.location.search);
-		const tab = params.get('tab');
-		if (tab === 'match') {
-			activeTab = 'match';
-			nicknameInput = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
-			handleStartMatchmaking(); // ponytail: bypass nickname form and start match directly
-		} else if (tab === 'create') {
-			activeTab = 'create';
-			const nickname = params.get('nickname');
-			if (nickname) {
-				nicknameInput = nickname;
-				handleCreateRoom(); // ponytail: auto-create room if redirected from /create
+		let session: any = null;
+		activeSession.subscribe((val) => {
+			session = val;
+		})();
+
+		if (session) {
+			roomId = session.roomId;
+			myEcdhKeyPair = session.myEcdhKeyPair;
+			myEcdsaKeyPair = session.myEcdsaKeyPair;
+			myEcdsaPkBase64 = session.myEcdsaPkBase64;
+			peerEcdhPublicKey = session.peerEcdhPublicKey;
+			aesKey = session.aesKey;
+			myNickname = session.myNickname;
+			memberId = session.memberId;
+			socket = session.socket;
+			roomState = 'chat';
+
+			// Bind WebSocket listener for chat state
+			if (socket) {
+				socket.onmessage = async (event) => {
+					try {
+						const data = JSON.parse(event.data);
+						if (data.roomId && data.roomId !== roomId) return;
+
+						if (data.event === 'error') {
+							if (data.code === 16 || data.payload?.code === 16) {
+								toastMessage = 'Security Alert: Tanda tangan pesan tidak valid (ECDSA Verify Failed)!';
+								showToast = true;
+								setTimeout(() => {
+									showToast = false;
+								}, 4000);
+							}
+							return;
+						}
+
+						if (data.event === 'new_message') {
+							if (data.senderMemberId === memberId) return;
+							const { ciphertext, iv, signature, timestamp } = data.payload;
+							if (!aesKey) return;
+
+							const decryptedText = await decrypt(ciphertext, iv, aesKey);
+							const decryptedObj = JSON.parse(decryptedText);
+
+							if (decryptedObj.type === 'handshake') {
+								peerEcdsaPublicKey = await importSigningPublicKey(decryptedObj.signingPublicKey);
+								partnerNickname = decryptedObj.nickname;
+								messages = [
+									...messages,
+									{
+										id: Date.now().toString(),
+										type: 'system',
+										text: `${decryptedObj.nickname} joined the session.`,
+										boxed: true
+									}
+								];
+								await tick();
+								scrollToBottom();
+							} else if (decryptedObj.type === 'chat') {
+								if (peerEcdsaPublicKey) {
+									const msgData = new TextEncoder().encode(ciphertext + iv + timestamp);
+									const isValid = await verify(msgData.buffer, signature, peerEcdsaPublicKey);
+									if (!isValid) {
+										console.error('ECDSA signature verification failed! Message untrusted.');
+										return;
+									}
+								}
+
+								const dateObj = new Date(timestamp);
+								const hours = dateObj.getHours();
+								const minutes = dateObj.getMinutes();
+								const ampm = hours >= 12 ? 'PM' : 'AM';
+								const timeString = `${hours % 12 || 12}:${minutes.toString().padStart(2, '0')} ${ampm}`;
+
+								messages = [
+									...messages,
+									{
+										id: Date.now().toString(),
+										type: 'partner',
+										sender: decryptedObj.nickname.substring(0, 2).toUpperCase(),
+										text: decryptedObj.text,
+										time: timeString
+									}
+								];
+								await tick();
+								scrollToBottom();
+							}
+						}
+					} catch (err) {
+						console.error('Error handling WS msg in chatroom:', err);
+					}
+				};
 			}
-		} else if (tab === 'join') {
-			activeTab = 'join';
-			const roomCode = params.get('roomCode');
-			const nickname = params.get('nickname');
-			if (roomCode && nickname) {
-				roomCodeInput = roomCode;
-				nicknameInput = nickname;
-				handleJoinRoom(); // ponytail: auto-join room if redirected from /join
+
+			sendHandshake();
+			messages = [
+				{
+					id: 'init-sys',
+					type: 'system',
+					text: 'Session established. Messages will self-destruct on disconnect.',
+					boxed: true
+				}
+			];
+			startTimer();
+			activeSession.set(null); // clear session store so fresh reload redirects out
+		} else {
+			const params = new URLSearchParams(window.location.search);
+			const tab = params.get('tab');
+			if (tab === 'match') {
+				activeTab = 'match';
+				nicknameInput = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
+				handleStartMatchmaking(); // ponytail: bypass nickname form and start match directly
+			} else if (tab === 'create') {
+				activeTab = 'create';
+				const nickname = params.get('nickname');
+				if (nickname) {
+					nicknameInput = nickname;
+					handleCreateRoom(); // ponytail: auto-create room if redirected from /create
+				}
+			} else if (tab === 'join') {
+				activeTab = 'join';
+				const roomCode = params.get('roomCode');
+				const nickname = params.get('nickname');
+				if (roomCode && nickname) {
+					roomCodeInput = roomCode;
+					nicknameInput = nickname;
+					handleJoinRoom(); // ponytail: auto-join room if redirected from /join
+				}
 			}
 		}
 
@@ -710,10 +817,8 @@
 				class="h-16 flex-shrink-0 flex items-center justify-between px-8 border-b border-outline-variant/30 bg-white"
 			>
 				<!-- Title (No Back Button in Figma Header) -->
-				<div class="flex items-center space-x-2">
-					<svg xmlns="http://www.w3.org/2000/svg" width="16" height="20" viewBox="0 0 16 20" fill="none">
-						<path d="M8 20C5.68333 19.4167 3.77083 18.0875 2.2625 16.0125C0.754167 13.9375 0 11.6333 0 9.1V3L8 0L16 3V9.1C16 11.6333 15.2458 13.9375 13.7375 16.0125C12.2292 18.0875 10.3167 19.4167 8 20ZM8 17.9C9.61667 17.4 10.9667 16.4125 12.05 14.9375C13.1333 13.4625 13.7667 11.8167 13.95 10H8V2.125L2 4.375V9.1C2 9.28333 2 9.43333 2 9.55C2 9.66667 2.01667 9.81667 2.05 10H8V17.9Z" fill="#00AEEF"/>
-					</svg>
+				<div class="flex items-center space-x-2.5">
+					<img src="/logo.webp" alt="UMBRA Logo" class="w-8 h-8 object-contain rounded-lg" />
 					<span class="font-bold text-lg text-[#00658D] tracking-tight font-['Space_Grotesk']"
 						>UMBRA</span
 					>
@@ -737,7 +842,7 @@
 				<!-- Avatars & Line Connection -->
 				<div class="flex items-center justify-between w-full max-w-sm relative">
 					<!-- Connection Line -->
-					<div class="absolute left-16 right-16 top-1/2 -translate-y-1/2 h-[2px] bg-gray-200">
+					<div class="absolute left-16 right-16 top-10 -translate-y-1/2 h-[2px] bg-gray-200">
 						<!-- Glowing Dot Flow Animation -->
 						<div
 							class="absolute top-0 bottom-0 w-4 bg-[#00aeef] rounded-full animate-flow-dot"
@@ -755,7 +860,7 @@
 								<circle cx="12" cy="7" r="4" stroke-linecap="round" stroke-linejoin="round"></circle>
 							</svg>
 							<!-- Blue connector dot on the right edge -->
-							<div class="absolute right-[-6px] top-[calc(50%-4px)] w-2.5 h-2.5 rounded-full bg-[#00aeef]"></div>
+							<div class="absolute right-[-6px] top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[#00aeef]"></div>
 						</div>
 						<span class="text-xs font-bold text-[#00aeef] tracking-widest uppercase font-label-mono"
 							>ANDA</span
