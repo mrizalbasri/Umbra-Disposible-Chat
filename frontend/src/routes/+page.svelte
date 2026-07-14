@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 
 	let showToast = $state(false);
 	let toastMsg = $state('');
@@ -11,6 +12,15 @@
 			showToast = false;
 		}, 4000);
 	}
+
+	onMount(() => {
+		const params = new URLSearchParams(window.location.search);
+		const err = params.get('error');
+		if (err) {
+			triggerToast(err);
+			window.history.replaceState({}, '', '/');
+		}
+	});
 </script>
 
 <svelte:head>
@@ -211,7 +221,7 @@
 				</div>
 				<h3>Random Match</h3>
 				<p>Terhubung secara acak dengan orang lain di seluruh dunia tanpa mengenal identitas.</p>
-				<button class="btn-outline-dark full" onclick={() => goto('/chatroom?tab=match')}
+				<button class="btn-outline-dark full" onclick={() => goto('/match')}
 					>Cari Teman Chat</button
 				>
 			</div>
