@@ -1,5 +1,10 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
+
+  function scrollToSecurity() {
+    document.querySelector('#security')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 </script>
 
 <svelte:head>
@@ -21,7 +26,7 @@
     </div>
     <div class="nav-right">
       <span class="lang">ID/EN</span>
-      <button class="btn-mulai" on:click={() => goto('/create')}>Mulai</button>
+      <button class="btn-mulai" onclick={() => goto(resolve('/create'))}>Mulai</button>
     </div>
   </nav>
 
@@ -41,8 +46,8 @@
         <h1>Bicara Bebas,<br><span class="accent">Tanpa Jejak,</span><br>Tanpa Identitas.</h1>
         <p class="hero-sub">Platform komunikasi paling aman untuk percakapan rahasia. Tidak ada login, tidak ada pelacakan, dan data Anda hilang seketika setelah selesai.</p>
         <div class="hero-btns">
-          <button class="btn-primary" on:click={() => goto('/create')}>Mulai Chat Sekarang →</button>
-          <button class="btn-ghost" on:click={() => goto('/docs')}>Pelajari Protokol</button>
+          <button class="btn-primary" onclick={() => goto(resolve('/create'))}>Mulai Chat Sekarang →</button>
+          <button class="btn-ghost" onclick={scrollToSecurity}>Pelajari Protokol</button>
         </div>
       </div>
 
@@ -76,7 +81,7 @@
 </svg>
               <span>Type secure message...</span>
             </div>
-            <button class="send-btn">
+            <button class="send-btn" type="button" aria-label="Kirim pesan">
              <svg xmlns="http://www.w3.org/2000/svg" width="19" height="16" viewBox="0 0 19 16" fill="none">
   <path d="M0 16V0L19 8L0 16ZM2 13L13.85 8L2 3V6.5L8 8L2 9.5V13ZM2 13V8V3V6.5V9.5V13Z" fill="#00658D"/>
 </svg>
@@ -100,7 +105,7 @@
         </div>
         <h3>Private Room</h3>
         <p>Buat ruang obrolan eksklusif dan bagikan kode rahasia kepada partner bicara Anda.</p>
-        <button class="btn-teal full" on:click={() => goto('/create')}>Buat Ruangan</button>
+        <button class="btn-teal full" onclick={() => goto(resolve('/create'))}>Buat Ruangan</button>
       </div>
       <div class="cta-card">
         <div class="cta-icon">
@@ -110,7 +115,7 @@
         </div>
         <h3>Random Match</h3>
         <p>Terhubung secara acak dengan orang lain di seluruh dunia tanpa mengenal identitas.</p>
-        <button class="btn-outline-card full" on:click={() => goto('/random')}>Cari Teman Chat</button>
+        <button class="btn-outline-card full" onclick={() => goto(resolve('/match'))}>Cari Teman Chat</button>
       </div>
     </div>
   </section>
