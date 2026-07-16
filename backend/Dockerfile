@@ -4,14 +4,8 @@ FROM golang:1.23-alpine AS builder
 WORKDIR /app
 
 # Copy dependency files first for caching
-COPY backend/go.mod backend/go.sum ./
-RUN go mod download
-
-# Copy the rest of the application source code
-COPY backend/ .
-
-# Build the Go application binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o umbra-server cmd/server/main.go
+COPY . ./
+RUN ls -R
 
 # Production stage
 FROM alpine:latest  
