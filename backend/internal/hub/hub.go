@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 	"umbra-backend/internal/crypto"
+	roomhandler "umbra-backend/internal/room/handler"
 
 	"github.com/gofiber/websocket/v2"
 )
@@ -132,6 +133,7 @@ func (h *Hub) Run() {
 
 				if len(connections) == 0 {
 					delete(h.rooms, client.RoomID)
+					roomhandler.DeleteRoom(client.RoomID)
 				}
 			}
 			h.mu.Unlock()

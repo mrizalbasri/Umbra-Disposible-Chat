@@ -1,0 +1,9 @@
+# Binaries
+*.exe
+backend/server.exe
+node_modules/
+.svelte-kit/
+dist/
+build/
+.env
+.env.local

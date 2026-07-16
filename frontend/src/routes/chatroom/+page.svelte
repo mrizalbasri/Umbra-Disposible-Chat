@@ -10,7 +10,6 @@
 		deriveAESKey,
 		encrypt,
 		decrypt,
-		generateSigningKeyPair,
 		exportSigningPublicKey,
 		importSigningPublicKey,
 		sign,
@@ -18,7 +17,7 @@
 	} from '$lib/crypto';
 
 	import { env } from '$env/dynamic/public';
-	import { activeSession } from '$lib/sessionStore';
+	import { activeSession, type ActiveSession } from '$lib/sessionStore';
 
 	// API and WS Configuration (dynamic with fallback to localhost)
 	const BACKEND_HOST = env.PUBLIC_BACKEND_URL || 'http://localhost:8080';
@@ -27,11 +26,8 @@
 
 	// roomState: set to 'setup' by default to render the real flow
 	let roomState = $state<'setup' | 'waiting' | 'match_waiting' | 'chat'>('setup');
-	let activeTab = $state<'create' | 'join' | 'match'>('create');
 	let nicknameInput = $state('');
 	let roomCodeInput = $state('');
-	let isLoading = $state(false);
-	let errorMessage = $state('');
 	let matchQueueId = $state('');
 
 	// Interactive features state
@@ -47,9 +43,7 @@
 	let partnerNickname = $state('');
 
 	// Deriving user initials dynamically
-	let myInitials = $derived(
-		myNickname ? myNickname.slice(0, 2).toUpperCase() : 'ME'
-	);
+	let myInitials = $derived(myNickname ? myNickname.slice(0, 2).toUpperCase() : 'ME');
 	let partnerInitials = $derived(
 		partnerNickname ? partnerNickname.slice(0, 2).toUpperCase() : '..'
 	);
@@ -69,8 +63,17 @@
 	let showToast = $state(false);
 	let toastMessage = $state('');
 
+	interface ChatMessage {
+		id: string;
+		type: 'system' | 'partner' | 'self';
+		text?: string;
+		boxed?: boolean;
+		sender?: string;
+		time?: string;
+	}
+
 	// Initial clean messages array
-	let messages = $state<any[]>([
+	let messages = $state<ChatMessage[]>([
 		{
 			id: 'm1',
 			type: 'system',
@@ -92,17 +95,20 @@
 
 	// TTL Timer
 	let timeLeft = $state(899); // 14:59 in seconds
-	let timerInterval: any = null;
+	let timerInterval: ReturnType<typeof setInterval> | undefined = undefined;
 
 	// Start TTL countdown
 	function startTimer() {
 		timeLeft = 899;
-		if (timerInterval) clearInterval(timerInterval);
+		if (timerInterval !== undefined) clearInterval(timerInterval);
 		timerInterval = setInterval(() => {
 			if (timeLeft > 0) {
 				timeLeft -= 1;
 			} else {
-				clearInterval(timerInterval);
+				if (timerInterval !== undefined) {
+					clearInterval(timerInterval);
+					timerInterval = undefined;
+				}
 				toastMessage = 'Sesi obrolan telah berakhir (Waktu TTL Habis)!';
 				showToast = true;
 				setTimeout(() => {
@@ -115,9 +121,9 @@
 
 	// Stop TTL countdown
 	function stopTimer() {
-		if (timerInterval) {
+		if (timerInterval !== undefined) {
 			clearInterval(timerInterval);
-			timerInterval = null;
+			timerInterval = undefined;
 		}
 	}
 
@@ -168,20 +174,6 @@
 		}
 	}
 
-	// Auto-format Room Code to XXXX-XX format
-	function handleRoomCodeInput(e: Event) {
-		const input = e.target as HTMLInputElement;
-		let val = input.value
-			.replace(/[^a-zA-Z0-9]/g, '')
-			.toUpperCase()
-			.slice(0, 6);
-		if (val.length > 4) {
-			val = val.slice(0, 4) + '-' + val.slice(4);
-		}
-		roomCodeInput = val;
-		input.value = val;
-	}
-
 	// Generate ECDH & ECDSA key pairs sharing the same key material
 	async function generateKeys() {
 		myEcdhKeyPair = await generateKeyPair();
@@ -215,10 +207,9 @@
 		myEcdsaPkBase64 = await exportSigningPublicKey(myEcdsaKeyPair.publicKey);
 	}
 
-	// Connect to WebSocket and bind message handlers (deferred hook)
-	function connectWebSocket(myEcdhPkBase64: string) {
-		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&publicKey=${encodeURIComponent(myEcdhPkBase64)}`;
-		socket = new WebSocket(wsUrl);
+	// Bind WebSocket handlers to the active socket
+	function bindWebSocketHandlers() {
+		if (!socket) return;
 
 		socket.onopen = () => {
 			isConnected = true;
@@ -327,6 +318,15 @@
 					];
 					isConnected = false;
 					stopTimer();
+
+					// Clear all private keys and session data from browser memory
+					aesKey = null;
+					myEcdhKeyPair = null;
+					myEcdsaKeyPair = null;
+					myEcdsaPkBase64 = '';
+					peerEcdhPublicKey = null;
+					peerEcdsaPublicKey = null;
+
 					await tick();
 					scrollToBottom();
 				}
@@ -339,6 +339,13 @@
 			isConnected = false;
 			stopTimer();
 		};
+	}
+
+	// Connect to WebSocket and bind message handlers (deferred hook)
+	function connectWebSocket(myEcdhPkBase64: string) {
+		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&publicKey=${encodeURIComponent(myEcdhPkBase64)}`;
+		socket = new WebSocket(wsUrl);
+		bindWebSocketHandlers();
 	}
 
 	// Encrypted Handshake over WebSocket
@@ -374,20 +381,21 @@
 		if (s.readyState === WebSocket.OPEN) {
 			s.send(JSON.stringify(msg));
 		} else if (s.readyState === WebSocket.CONNECTING) {
-			s.addEventListener('open', () => {
-				s.send(JSON.stringify(msg));
-			}, { once: true });
+			s.addEventListener(
+				'open',
+				() => {
+					s.send(JSON.stringify(msg));
+				},
+				{ once: true }
+			);
 		}
 	}
 
 	// Call POST /v1/api/room/create (deferred hook)
 	async function handleCreateRoom() {
 		if (!nicknameInput.trim()) {
-			errorMessage = 'Nickname cannot be empty';
 			return;
 		}
-		isLoading = true;
-		errorMessage = '';
 		try {
 			await generateKeys();
 			const myEcdhPkBase64 = await exportPublicKey(myEcdhKeyPair!.publicKey);
@@ -420,26 +428,23 @@
 			roomState = 'waiting';
 			window.history.replaceState({}, '', '/chatroom'); // ponytail: clear url params
 			connectWebSocket(myEcdhPkBase64);
-		} catch (err: any) {
-			const errMsg = err.message || 'Network error, please start/check the backend server.';
-			goto(`/create?error=${encodeURIComponent(errMsg)}`);
-		} finally {
-			isLoading = false;
+		} catch (err: unknown) {
+			const errMsg =
+				err instanceof Error
+					? err.message
+					: 'Network error, please start/check the backend server.';
+			goto(resolve(`/create?error=${encodeURIComponent(errMsg)}`));
 		}
 	}
 
 	// Call POST /v1/api/room/join (deferred hook)
 	async function handleJoinRoom() {
 		if (!roomCodeInput.trim() || roomCodeInput.length < 7) {
-			errorMessage = 'Enter a valid Room Code (XXXX-XX)';
 			return;
 		}
 		if (!nicknameInput.trim()) {
-			errorMessage = 'Nickname cannot be empty';
 			return;
 		}
-		isLoading = true;
-		errorMessage = '';
 		try {
 			await generateKeys();
 			const myEcdhPkBase64 = await exportPublicKey(myEcdhKeyPair!.publicKey);
@@ -483,11 +488,12 @@
 			window.history.replaceState({}, '', '/chatroom'); // ponytail: clear url params
 			startTimer();
 			connectWebSocket(myEcdhPkBase64);
-		} catch (err: any) {
-			const errMsg = err.message || 'Network error, please start/check the backend server.';
-			goto(`/join?error=${encodeURIComponent(errMsg)}`);
-		} finally {
-			isLoading = false;
+		} catch (err: unknown) {
+			const errMsg =
+				err instanceof Error
+					? err.message
+					: 'Network error, please start/check the backend server.';
+			goto(resolve(`/join?error=${encodeURIComponent(errMsg)}`));
 		}
 	}
 
@@ -497,8 +503,6 @@
 		if (!finalNickname) {
 			finalNickname = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
 		}
-		isLoading = true;
-		errorMessage = '';
 
 		try {
 			await generateKeys();
@@ -531,11 +535,10 @@
 			}
 
 			throw new Error(result.responseMessage || 'Gagal memulai random match.');
-		} catch (err: any) {
-			const errMsg = err.message || 'Error memulai random match, silakan coba lagi.';
-			goto(`/?error=${encodeURIComponent(errMsg)}`);
-		} finally {
-			isLoading = false;
+		} catch (err: unknown) {
+			const errMsg =
+				err instanceof Error ? err.message : 'Error memulai random match, silakan coba lagi.';
+			goto(resolve(`/?error=${encodeURIComponent(errMsg)}`));
 		}
 	}
 
@@ -646,12 +649,20 @@
 		isConnected = false;
 		roomState = 'setup';
 		messages = [];
+
+		// Clear all private keys and session data from browser memory
 		aesKey = null;
+		myEcdhKeyPair = null;
+		myEcdsaKeyPair = null;
+		myEcdsaPkBase64 = '';
+		peerEcdhPublicKey = null;
+		peerEcdsaPublicKey = null;
+
 		nicknameInput = '';
 		roomCodeInput = '';
 		matchQueueId = '';
 		stopTimer();
-		goto('/'); // ponytail: redirect to home to reset query params
+		goto(resolve('/')); // ponytail: redirect to home to reset query params
 	}
 
 	// Reset messages (used for Clear Chat in dropdown)
@@ -668,26 +679,36 @@
 
 	// Initialize view based on query tab
 	onMount(() => {
-		let session: any = null;
+		let session: ActiveSession | null = null;
 		activeSession.subscribe((val) => {
 			session = val;
 		})();
 
-		if (session) {
-			roomId = session.roomId;
-			myEcdhKeyPair = session.myEcdhKeyPair;
-			myEcdsaKeyPair = session.myEcdsaKeyPair;
-			myEcdsaPkBase64 = session.myEcdsaPkBase64;
-			peerEcdhPublicKey = session.peerEcdhPublicKey;
-			aesKey = session.aesKey;
-			myNickname = session.myNickname;
-			memberId = session.memberId;
+		const activeSessionData = session as ActiveSession | null;
+		if (activeSessionData) {
+			roomId = activeSessionData.roomId;
+			myEcdhKeyPair = activeSessionData.myEcdhKeyPair;
+			myEcdsaKeyPair = activeSessionData.myEcdsaKeyPair;
+			myEcdsaPkBase64 = activeSessionData.myEcdsaPkBase64;
+			peerEcdhPublicKey = activeSessionData.peerEcdhPublicKey;
+			aesKey = activeSessionData.aesKey;
+			myNickname = activeSessionData.myNickname;
+			memberId = activeSessionData.memberId;
 			roomState = 'chat';
 
-			// Connect to WebSocket using the unified flow
-			exportPublicKey(myEcdhKeyPair!.publicKey).then((myEcdhPkBase64) => {
-				connectWebSocket(myEcdhPkBase64);
-			});
+			// Connect or reuse WebSocket connection
+			if (activeSessionData.socket) {
+				socket = activeSessionData.socket;
+				isConnected = true;
+				bindWebSocketHandlers();
+				if (aesKey) {
+					sendHandshake();
+				}
+			} else {
+				exportPublicKey(myEcdhKeyPair!.publicKey).then((myEcdhPkBase64) => {
+					connectWebSocket(myEcdhPkBase64);
+				});
+			}
 
 			messages = [
 				{
@@ -703,18 +724,15 @@
 			const params = new URLSearchParams(window.location.search);
 			const tab = params.get('tab');
 			if (tab === 'match') {
-				activeTab = 'match';
 				nicknameInput = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
 				handleStartMatchmaking(); // ponytail: bypass nickname form and start match directly
 			} else if (tab === 'create') {
-				activeTab = 'create';
 				const nickname = params.get('nickname');
 				if (nickname) {
 					nicknameInput = nickname;
 					handleCreateRoom(); // ponytail: auto-create room if redirected from /create
 				}
 			} else if (tab === 'join') {
-				activeTab = 'join';
 				const roomCode = params.get('roomCode');
 				const nickname = params.get('nickname');
 				if (roomCode && nickname) {
@@ -740,8 +758,12 @@
 	{#if roomState === 'setup'}
 		<!-- INITIALIZING SECURITY / REDIRECTING SCREEN -->
 		<div class="flex flex-col items-center justify-center h-full space-y-4 bg-white">
-			<div class="w-10 h-10 border-4 border-[#00aeef] border-t-transparent rounded-full animate-spin"></div>
-			<p class="text-sm font-label-mono text-outline uppercase tracking-wider">Inisialisasi Keamanan...</p>
+			<div
+				class="w-10 h-10 border-4 border-[#00aeef] border-t-transparent rounded-full animate-spin"
+			></div>
+			<p class="text-sm font-label-mono text-outline uppercase tracking-wider">
+				Inisialisasi Keamanan...
+			</p>
 		</div>
 	{:else if roomState === 'match_waiting'}
 		<!-- RANDOM MATCH WAITING SCREEN -->
@@ -789,12 +811,25 @@
 							class="w-20 h-20 rounded-full border-4 border-[#00aeef] bg-white flex items-center justify-center shadow-premium relative select-none"
 						>
 							<!-- Stylized Profile Avatar SVG -->
-							<svg class="w-10 h-10 text-[#00658D]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-								<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke-linecap="round" stroke-linejoin="round"></path>
-								<circle cx="12" cy="7" r="4" stroke-linecap="round" stroke-linejoin="round"></circle>
+							<svg
+								class="w-10 h-10 text-[#00658D]"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
+								<path
+									d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								></path>
+								<circle cx="12" cy="7" r="4" stroke-linecap="round" stroke-linejoin="round"
+								></circle>
 							</svg>
 							<!-- Blue connector dot on the right edge -->
-							<div class="absolute right-[-6px] top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[#00aeef]"></div>
+							<div
+								class="absolute right-[-6px] top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[#00aeef]"
+							></div>
 						</div>
 						<span class="text-xs font-bold text-[#00aeef] tracking-widest uppercase font-label-mono"
 							>ANDA</span
@@ -844,7 +879,9 @@
 					</div>
 					<span class="opacity-30">||</span>
 					<div class="flex items-center space-x-1.5">
-						<span class="material-symbols-outlined text-[16px] text-[#EF4444] leading-none">timer</span>
+						<span class="material-symbols-outlined text-[16px] text-[#EF4444] leading-none"
+							>timer</span
+						>
 						<span>&lt; 30 detik</span>
 					</div>
 				</div>
