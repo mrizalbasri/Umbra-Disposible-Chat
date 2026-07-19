@@ -1138,7 +1138,7 @@
 					{:else}
 						{#each filteredMessages as msg (msg.id)}
 							{#if msg.type === 'system'}
-								<div class="flex justify-center">
+								<div class="flex justify-center animate-message-fade-in">
 									{#if msg.boxed}
 										<p
 											class="italic text-on-surface-variant/60 text-sm bg-surface-container-low px-4 py-1 rounded-full border border-outline-variant/10 text-center"
@@ -1152,7 +1152,7 @@
 									{/if}
 								</div>
 							{:else if msg.type === 'partner'}
-								<div class="flex items-end space-x-2 max-w-[80%]">
+								<div class="flex items-end space-x-2 max-w-[80%] animate-message-fade-in">
 									<div
 										class="w-8 h-8 rounded-full bg-secondary-container flex-shrink-0 flex items-center justify-center text-[12px] font-bold text-on-secondary-container"
 									>
@@ -1166,7 +1166,7 @@
 									</div>
 								</div>
 							{:else if msg.type === 'self'}
-								<div class="flex items-end justify-end space-x-2 ml-auto max-w-[80%]">
+								<div class="flex items-end justify-end space-x-2 ml-auto max-w-[80%] animate-message-fade-in">
 									<div
 										class="bg-primary-container text-white p-4 rounded-2xl shadow-premium bubble-self"
 									>
