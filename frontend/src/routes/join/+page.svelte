@@ -67,6 +67,7 @@
 	<nav class="navbar">
 		<div class="nav-left">
 			<div class="nav-brand">
+				<img src="/logo.webp" alt="UMBRA Logo" class="logo-img" style="height: 28px; width: 28px; margin-right: 8px;" />
 				<span class="brand-blue">UMBRA</span>
 				<span class="brand-divider">|</span>
 				<span class="brand-gray">PROTOCOL</span>
@@ -717,5 +718,82 @@
 		text-align: center;
 		font-weight: 500;
 		font-family: 'Inter', sans-serif;
+	}
+
+	/* ── RESPONSIVENESS ── */
+	@media (max-width: 768px) {
+		.dashboard-layout {
+			height: auto;
+			overflow-y: auto;
+		}
+
+		.navbar {
+			padding: 0 16px;
+		}
+
+		.nav-center {
+			display: none;
+		}
+
+		.main-wrapper {
+			flex-direction: column;
+			overflow: visible;
+		}
+
+		.sidebar {
+			width: 100%;
+			padding: 24px 20px;
+			border-right: none;
+			border-bottom: 1px solid #cbd5e1;
+			gap: 20px;
+		}
+
+		.sidebar-top {
+			gap: 20px;
+		}
+
+		.badges,
+		.guide-box,
+		.sidebar-bottom {
+			display: none;
+		}
+
+		.content-area {
+			padding: 40px 20px;
+			min-height: calc(100vh - 120px);
+			justify-content: flex-start;
+		}
+
+		.watermark {
+			font-size: 60px;
+			line-height: 60px;
+			top: 16px;
+			right: 16px;
+			opacity: 0.1;
+		}
+
+		.header-text {
+			margin-bottom: 24px;
+		}
+
+		.header-text h1 {
+			font-size: 26px;
+		}
+
+		.form-card {
+			padding: 24px 20px;
+			box-shadow: none;
+			border: 1px solid #cbd5e1;
+		}
+
+		.otp-container {
+			gap: 6px;
+		}
+
+		.otp-box {
+			width: 42px;
+			height: 48px;
+			font-size: 20px;
+		}
 	}
 </style>
