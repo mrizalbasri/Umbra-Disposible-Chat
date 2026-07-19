@@ -240,7 +240,7 @@
 			<!-- Left Avatar (ANDA) -->
 			<div class="flex flex-col items-center space-y-3 z-10">
 				<div
-					class="w-20 h-20 rounded-full border-4 border-[#00aeef] bg-white flex items-center justify-center shadow-lg relative"
+					class="w-20 h-20 rounded-full border-4 border-[#00aeef] bg-white flex items-center justify-center shadow-lg relative animate-pulse-glow"
 				>
 					<!-- Stylized Profile Avatar SVG -->
 					<svg

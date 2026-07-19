@@ -154,3 +154,32 @@ body {
 	position: absolute;
 	animation: infinite-slide 1.5s linear infinite;
 }
+
+/* Custom micro-animations */
+@keyframes message-fade-in {
+	0% {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	100% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+.animate-message-fade-in {
+	animation: message-fade-in 0.25s cubic-bezier(0.215, 0.61, 0.355, 1) forwards;
+}
+
+@keyframes pulse-glow {
+	0%, 100% {
+		transform: scale(1);
+		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+	}
+	50% {
+		transform: scale(1.015);
+		box-shadow: 0 10px 25px rgba(0, 174, 239, 0.15);
+	}
+}
+.animate-pulse-glow {
+	animation: pulse-glow 3s ease-in-out infinite;
+}
