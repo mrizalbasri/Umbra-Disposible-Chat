@@ -26,6 +26,7 @@
 
 	// roomState: set to 'setup' by default to render the real flow
 	let roomState = $state<'setup' | 'waiting' | 'match_waiting' | 'chat'>('setup');
+	let isSidebarOpen = $state(false);
 	let nicknameInput = $state('');
 	let roomCodeInput = $state('');
 	let matchQueueId = $state('');
@@ -902,10 +903,19 @@
 		</div>
 	{:else}
 		<!-- CHAT ROOM INTERFACE -->
-		<div class="flex h-screen overflow-hidden w-full bg-surface-container-lowest">
+		<div class="flex h-screen overflow-hidden w-full bg-surface-container-lowest relative">
+			{#if isSidebarOpen}
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div
+					class="fixed inset-0 bg-black/40 z-20 md:hidden animate-fade-in"
+					onclick={() => (isSidebarOpen = false)}
+				></div>
+			{/if}
+
 			<!-- Sidebar (Left, 300px) -->
 			<aside
-				class="w-[300px] flex-shrink-0 bg-surface-container-low border-r border-outline-variant/20 flex flex-col justify-between sidebar-transition"
+				class="w-[300px] flex-shrink-0 bg-surface-container-low border-r border-outline-variant/20 flex flex-col justify-between sidebar-transition fixed md:relative z-30 h-full {isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}"
 			>
 				<div class="p-gutter space-y-8">
 					<!-- Brand Anchor -->
@@ -1008,7 +1018,16 @@
 				<header
 					class="h-16 flex items-center justify-between px-gutter border-b border-outline-variant/10 z-10 bg-white/80 backdrop-blur-md"
 				>
-					<div class="flex items-center space-x-4">
+					<div class="flex items-center space-x-2 md:space-x-4">
+						<!-- Mobile Sidebar Toggle Button -->
+						<button
+							onclick={() => (isSidebarOpen = !isSidebarOpen)}
+							class="md:hidden flex items-center justify-center p-2 rounded-lg bg-surface-container-low border border-outline-variant/30 text-primary hover:bg-surface-container-highest transition-colors cursor-pointer mr-1"
+							aria-label="Toggle Sidebar"
+						>
+							<span class="material-symbols-outlined text-[20px] leading-none">menu</span>
+						</button>
+
 						<div class="flex -space-x-2">
 							<div
 								class="w-8 h-8 rounded-full border-2 border-white bg-primary-fixed flex items-center justify-center text-[10px] font-bold text-on-primary-fixed-variant select-none"
@@ -1181,7 +1200,7 @@
 								<span class="material-symbols-outlined">sentiment_satisfied</span>
 							</button>
 							<div class="h-4 w-[1px] bg-outline-variant/30 mx-2"></div>
-							<span class="text-[10px] font-label-mono text-outline-variant uppercase"
+							<span class="text-[10px] font-label-mono text-outline-variant uppercase hidden sm:inline"
 								>Ephemeral Encryption Active</span
 							>
 						</div>
