@@ -243,6 +243,17 @@ umbra/
 
 ---
 
+## 🌐 Deployment
+
+### Backend (Azure Container Apps - Recommended)
+The backend is dockerized and ready to be deployed to **Azure Container Apps** via **Docker Hub**. 
+- Follow the detailed guide in [DEPLOY_AZURE.md](file:///d:/Coding/umbra/backend/DEPLOY_AZURE.md) to set up automated deployments using GitHub Actions or manually deploy via CLI.
+
+### Backend (Heroku - Alternative)
+A `heroku.yml` is provided at the root for container deployments on Heroku if needed.
+
+---
+
 ## 🔒 Security Notes
 
 - **Private keys** are generated in browser memory and never sent to the server
