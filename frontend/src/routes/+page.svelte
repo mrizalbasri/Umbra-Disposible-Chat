@@ -367,8 +367,13 @@
 		gap: 12px;
 	}
 	.logo-img {
-		height: 32px;
-		width: 32px;
+		height: 40px;
+		width: 40px;
+		padding: 6px;
+		background: #ffffff;
+		border: 1px solid #e2e8f0;
+		border-radius: 10px;
+		object-fit: contain;
 	}
 	.logo-text {
 		font-family: 'Space Grotesk', sans-serif;
@@ -380,21 +385,31 @@
 
 	.nav-center {
 		display: flex;
-		gap: 8px;
+		gap: 32px;
 	}
 	.nav-link {
-		font-family: 'JetBrains Mono', monospace;
+		font-family: 'Inter', sans-serif;
 		font-size: 14px;
 		font-weight: 500;
-		color: #3e4850;
+		color: #4b5563;
 		text-decoration: none;
-		padding: 4px 14px;
-		border-radius: 6px;
+		position: relative;
+		padding: 6px 0;
 		transition: color 0.2s;
 	}
 	.nav-link.active {
 		color: #00658d;
-		border-bottom: 2px solid #00658d;
+		font-weight: 600;
+	}
+	.nav-link.active::after {
+		content: '';
+		position: absolute;
+		bottom: -4px;
+		left: 0;
+		right: 0;
+		height: 2px;
+		background-color: #00658d;
+		border-radius: 1px;
 	}
 	.nav-link:hover {
 		color: #0f1c2c;
@@ -403,25 +418,35 @@
 	.nav-right {
 		display: flex;
 		align-items: center;
-		gap: 20px;
+		gap: 24px;
 	}
 	.lang {
-		font-family: 'JetBrains Mono', monospace;
+		font-family: 'Inter', sans-serif;
 		font-size: 14px;
-		color: #3e4850;
+		color: #4b5563;
 		font-weight: 500;
 		cursor: pointer;
 	}
 	.btn-mulai {
 		background: #00aeef;
-		color: #003e58;
+		color: #ffffff;
 		border: none;
 		padding: 10px 24px;
-		border-radius: 8px;
-		font-weight: 700;
+		border-radius: 12px;
+		font-weight: 600;
 		font-size: 14px;
 		cursor: pointer;
-		font-family: 'Inter';
+		font-family: 'Inter', sans-serif;
+		box-shadow: 0 4px 14px rgba(0, 174, 239, 0.4);
+		transition: all 0.2s ease;
+	}
+	.btn-mulai:hover {
+		background: #009ce5;
+		box-shadow: 0 6px 18px rgba(0, 174, 239, 0.55);
+		transform: translateY(-1px);
+	}
+	.btn-mulai:active {
+		transform: translateY(0);
 	}
 
 	/* ── HERO ── */
