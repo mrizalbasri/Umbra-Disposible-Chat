@@ -70,7 +70,7 @@
 	}
 
 	function connectWebSocket(myEcdhPkBase64: string) {
-		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&publicKey=${encodeURIComponent(myEcdhPkBase64)}`;
+		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&publicKey=${encodeURIComponent(myEcdhPkBase64)}&signingKey=${encodeURIComponent(myEcdsaPkBase64)}`;
 		socket = new WebSocket(wsUrl);
 
 		socket.onmessage = async (event) => {
@@ -240,7 +240,7 @@
 			<!-- Left Avatar (ANDA) -->
 			<div class="flex flex-col items-center space-y-3 z-10">
 				<div
-					class="w-20 h-20 rounded-full border-4 border-[#00aeef] bg-white flex items-center justify-center shadow-lg relative animate-pulse-glow"
+					class="w-20 h-20 rounded-full border-4 border-[#00aeef] bg-white flex items-center justify-center shadow-lg relative"
 				>
 					<!-- Stylized Profile Avatar SVG -->
 					<svg

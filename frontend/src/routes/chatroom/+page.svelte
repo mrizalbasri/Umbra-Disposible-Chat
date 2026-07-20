@@ -344,7 +344,7 @@
 
 	// Connect to WebSocket and bind message handlers (deferred hook)
 	function connectWebSocket(myEcdhPkBase64: string) {
-		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&publicKey=${encodeURIComponent(myEcdhPkBase64)}`;
+		const wsUrl = `${WS_BASE_URL}?roomId=${roomId}&publicKey=${encodeURIComponent(myEcdhPkBase64)}&signingKey=${encodeURIComponent(myEcdsaPkBase64)}`;
 		socket = new WebSocket(wsUrl);
 		bindWebSocketHandlers();
 	}
@@ -1192,21 +1192,6 @@
 					<div
 						class="max-w-[1000px] mx-auto bg-white border border-outline-variant/30 rounded-2xl shadow-sm focus-within:ring-4 focus-within:ring-primary-container/10 focus-within:border-primary transition-all"
 					>
-						<div class="flex items-center p-2 border-b border-outline-variant/10 space-x-2">
-							<button class="p-2 text-outline-variant hover:text-primary transition-colors">
-								<span class="material-symbols-outlined">format_bold</span>
-							</button>
-							<button class="p-2 text-outline-variant hover:text-primary transition-colors">
-								<span class="material-symbols-outlined">attach_file</span>
-							</button>
-							<button class="p-2 text-outline-variant hover:text-primary transition-colors">
-								<span class="material-symbols-outlined">sentiment_satisfied</span>
-							</button>
-							<div class="h-4 w-[1px] bg-outline-variant/30 mx-2"></div>
-							<span class="text-[10px] font-label-mono text-outline-variant uppercase hidden sm:inline"
-								>Ephemeral Encryption Active</span
-							>
-						</div>
 						<div class="flex items-end p-3 space-x-3">
 							<textarea
 								bind:this={textareaElement}
