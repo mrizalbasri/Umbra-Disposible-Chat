@@ -118,8 +118,8 @@ func CreateRoom(c *fiber.Ctx) error {
 			},
 		},
 		Status:     "waiting", // Status awal: waiting
-		Type:       "custom",  // Custom group chat
-		MaxMembers: 5,         // Maksimal 5 anggota untuk custom room
+		Type:       "custom",  // Custom 1-on-1 chat
+		MaxMembers: 2,         // Maksimal 2 anggota (ECDH pairwise E2EE)
 		CreatedAt:  time.Now(),
 	}
 
@@ -164,10 +164,10 @@ func JoinRoom(c *fiber.Ctx) error {
 	}
 	maxCap := room.MaxMembers
 	if maxCap == 0 {
-		maxCap = 5
+		maxCap = 2
 	}
 	if len(room.Members) >= maxCap {
-		return fail(c, 409, "14", "Room sudah penuh, maksimal 5 anggota") // Sesuai Error Code 14
+		return fail(c, 409, "14", "Room sudah penuh, maksimal 2 anggota") // Sesuai Error Code 14
 	}
 
 	// Ambil data publicKey milik user pertama (peer) untuk proses key exchange

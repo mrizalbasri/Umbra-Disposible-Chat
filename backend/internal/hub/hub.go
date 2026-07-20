@@ -22,8 +22,10 @@ type Client struct {
 }
 
 type WSMessageWrapper struct {
-	Event   string          `json:"event"`
-	Payload json.RawMessage `json:"payload"`
+	Event          string          `json:"event"`
+	RoomID         string          `json:"roomId,omitempty"`
+	SenderMemberID string          `json:"senderMemberId,omitempty"`
+	Payload        json.RawMessage `json:"payload"`
 }
 
 type SendMessagePayload struct {
@@ -180,7 +182,7 @@ func (h *Hub) HandleWS(c *websocket.Conn) {
 		Conn:           c,
 		RoomID:         roomID,
 		EcdhPublicKey:  pubKey,
-		EcdsaPublicKey: pubKey,
+		EcdsaPublicKey: c.Query("signingKey"),
 		PublicKey:      pubKey,
 		Send:           make(chan []byte, 256),
 	}
@@ -218,10 +220,10 @@ func (h *Hub) HandleWS(c *websocket.Conn) {
 				break
 			}
 
-			publicKeyForVerification := client.PublicKey
+			publicKeyForVerification := client.EcdsaPublicKey
 			if publicKeyForVerification == "" {
-				h.sendError(c, "16", "Public key tidak tersedia untuk verifikasi tanda tangan")
-				continue
+				// ponytail: fallback ke ECDH key jika signingKey tidak dikirim (backward compat)
+				publicKeyForVerification = client.PublicKey
 			}
 
 			dataToVerify := []byte(payload.Ciphertext + payload.IV + payload.Timestamp)
@@ -238,8 +240,10 @@ func (h *Hub) HandleWS(c *websocket.Conn) {
 			}
 
 			outboundMessage := WSMessageWrapper{
-				Event:   "message",
-				Payload: validPayloadBytes,
+				Event:          "message",
+				RoomID:         client.RoomID,
+				SenderMemberID: wrapper.SenderMemberID,
+				Payload:        validPayloadBytes,
 			}
 
 			jsonBytes, err := json.Marshal(outboundMessage)
