@@ -9,8 +9,6 @@
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
 
-{#key $page.url.pathname}
-	<div in:fade={{ duration: 220, delay: 60 }} out:fade={{ duration: 160 }}>
-		{@render children()}
-	</div>
-{/key}
+<div class="min-h-screen relative" in:fade={{ duration: 250, delay: 50 }} out:fade={{ duration: 150 }}>
+	{@render children()}
+</div>

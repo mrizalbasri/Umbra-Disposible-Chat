@@ -1,9 +1,71 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 
 	let activeNav = $state('features');
+	let hoveredNav = $state<string | null>(null);
+	let currentLang = $state<'id' | 'en'>('id');
+
+	function toggleLang() {
+		currentLang = currentLang === 'id' ? 'en' : 'id';
+	}
+
+	const translations = {
+		id: {
+			features: 'Fitur',
+			security: 'Keamanan',
+			docs: 'Dokumentasi',
+			start: 'Mulai',
+			badge: 'END-TO-END ENCRYPTED',
+			h1_1: 'Bicara Bebas,',
+			h1_2: 'Tanpa Jejak,',
+			h1_3: 'Tanpa Identitas.',
+			sub: 'Platform komunikasi paling aman untuk percakapan rahasia. Tidak ada login, tidak ada pelacakan, dan data Anda hilang seketika setelah selesai.',
+			btnStart: 'Mulai Chat Sekarang →',
+			btnProtocol: 'Pelajari Protokol'
+		},
+		en: {
+			features: 'Features',
+			security: 'Security',
+			docs: 'Documentation',
+			start: 'Start',
+			badge: 'END-TO-END ENCRYPTED',
+			h1_1: 'Speak Freely,',
+			h1_2: 'Without Traces,',
+			h1_3: 'Without Identity.',
+			sub: 'The most secure communication platform for confidential conversations. No login, no tracking, and your data vanishes immediately when done.',
+			btnStart: 'Start Chat Now →',
+			btnProtocol: 'Learn Protocol'
+		}
+	};
+
+	let t = $derived(translations[currentLang]);
+
+	let displayNav = $derived(hoveredNav || activeNav);
+
+	let indicatorLeft = $state(0);
+	let indicatorWidth = $state(0);
+	let featuresBtn = $state<HTMLButtonElement | null>(null);
+	let securityBtn = $state<HTMLButtonElement | null>(null);
+	let docsBtn = $state<HTMLButtonElement | null>(null);
+
+	async function updateIndicator(navId: string) {
+		await tick();
+		let btn: HTMLButtonElement | null = null;
+		if (navId === 'features') btn = featuresBtn;
+		else if (navId === 'security') btn = securityBtn;
+		else if (navId === 'docs') btn = docsBtn;
+
+		if (btn && btn.offsetWidth > 0) {
+			indicatorLeft = btn.offsetLeft;
+			indicatorWidth = btn.offsetWidth;
+		}
+	}
+
+	$effect(() => {
+		updateIndicator(displayNav);
+	});
 
 	function scrollToSecurity() {
 		document.querySelector('#security')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -13,22 +75,101 @@
 		document.querySelector(`#${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 
+	let visibleMsgs = $state(0);
+	let isTyping = $state(true);
+	let typingUser = $state('Anonymous User #294');
+
+	let heroRevealed = $state(false);
+	let ctaRevealed = $state(false);
+	let stepsRevealed = $state(false);
+	let featuresRevealed = $state(false);
+	let footerRevealed = $state(false);
+
 	onMount(() => {
-		const sections = ['security', 'features', 'docs'];
-		const observers: IntersectionObserver[] = [];
+		updateIndicator(activeNav);
 
-		sections.forEach((id) => {
-			const el = document.querySelector(`#${id}`);
-			if (!el) return;
-			const obs = new IntersectionObserver(
-				([entry]) => { if (entry.isIntersecting) activeNav = id; },
-				{ threshold: 0.35 }
-			);
-			obs.observe(el);
-			observers.push(obs);
-		});
+		// Immediately reveal hero on mount
+		setTimeout(() => (heroRevealed = true), 100);
 
-		return () => observers.forEach((o) => o.disconnect());
+		// Timeline: Typing indicator BEFORE each full pop-up bubble
+		const t1 = setTimeout(() => {
+			isTyping = false;
+			visibleMsgs = 1; // 1.0s: Full Chat 1 pops up!
+		}, 1000);
+
+		const t2 = setTimeout(() => {
+			typingUser = 'You';
+			isTyping = true; // 1.8s: You are typing...
+		}, 1800);
+
+		const t3 = setTimeout(() => {
+			isTyping = false;
+			visibleMsgs = 2; // 2.8s: Full Chat 2 (blue) pops up!
+		}, 2800);
+
+		const t4 = setTimeout(() => {
+			typingUser = 'Anonymous User #294';
+			isTyping = true; // 3.6s: User 294 is typing...
+		}, 3600);
+
+		const t5 = setTimeout(() => {
+			isTyping = false;
+			visibleMsgs = 3; // 4.6s: Full Chat 3 pops up!
+		}, 4600);
+
+		const handleResize = () => updateIndicator(activeNav);
+		window.addEventListener('resize', handleResize, { passive: true });
+
+		const sectionIds = ['features', 'security', 'docs'];
+		const sectionsMap = [
+			{ sel: '.cta-section', set: () => (ctaRevealed = true) },
+			{ sel: '.steps', set: () => (stepsRevealed = true) },
+			{ sel: '.features', set: () => (featuresRevealed = true) },
+			{ sel: 'footer', set: () => (footerRevealed = true) }
+		];
+
+		const handleScroll = () => {
+			const scrollPosition = window.scrollY + 120;
+			for (let i = sectionIds.length - 1; i >= 0; i--) {
+				const id = sectionIds[i];
+				const el = document.querySelector(`#${id}`);
+				if (el) {
+					const top = (el as HTMLElement).offsetTop;
+					if (scrollPosition >= top) {
+						if (activeNav !== id) {
+							activeNav = id;
+						}
+						break;
+					}
+				}
+			}
+
+			// Smooth Scroll Reveal Trigger on Scroll
+			const triggerBottom = window.innerHeight * 0.88;
+			sectionsMap.forEach((s) => {
+				const el = document.querySelector(s.sel);
+				if (el) {
+					const rect = el.getBoundingClientRect();
+					if (rect.top < triggerBottom) {
+						s.set();
+					}
+				}
+			});
+		};
+
+		window.addEventListener('scroll', handleScroll, { passive: true });
+		handleScroll(); // Initial check for active section and visible elements
+
+		return () => {
+			clearTimeout(t1);
+			clearTimeout(t2);
+			clearTimeout(t3);
+			clearTimeout(t4);
+			clearTimeout(t5);
+			window.removeEventListener('scroll', handleScroll);
+			window.removeEventListener('resize', handleResize);
+			revealObserver.disconnect();
+		};
 	});
 </script>
 
@@ -47,49 +188,57 @@
 			<img src="/logo.webp" alt="UMBRA Logo" class="logo-img" />
 			<span class="logo-text">UMBRA</span>
 		</div>
-		<div class="nav-center">
-			<button onclick={() => scrollTo('features')} class="nav-link {activeNav === 'features' ? 'active' : ''}">Features</button>
-			<button onclick={() => scrollTo('security')} class="nav-link {activeNav === 'security' ? 'active' : ''}">Security</button>
-			<button onclick={() => scrollTo('docs')} class="nav-link {activeNav === 'docs' ? 'active' : ''}">Documentation</button>
+		<div class="nav-center" onmouseleave={() => (hoveredNav = null)}>
+			<button
+				bind:this={featuresBtn}
+				onclick={() => scrollTo('features')}
+				onmouseenter={() => (hoveredNav = 'features')}
+				class="nav-link {displayNav === 'features' ? 'active' : ''}">{t.features}</button
+			>
+			<button
+				bind:this={securityBtn}
+				onclick={() => scrollTo('security')}
+				onmouseenter={() => (hoveredNav = 'security')}
+				class="nav-link {displayNav === 'security' ? 'active' : ''}">{t.security}</button
+			>
+			<button
+				bind:this={docsBtn}
+				onclick={() => scrollTo('docs')}
+				onmouseenter={() => (hoveredNav = 'docs')}
+				class="nav-link {displayNav === 'docs' ? 'active' : ''}">{t.docs}</button
+			>
+			<div class="sliding-indicator" style="left: {indicatorLeft}px; width: {indicatorWidth}px;"></div>
 		</div>
 		<div class="nav-right">
-			<span class="lang">ID/EN</span>
-			<button class="btn-mulai" onclick={() => goto(resolve('/create'))}>Mulai</button>
+			<button class="lang-toggle" onclick={toggleLang} title="Ubah Bahasa / Switch Language">
+				<span class:active-lang={currentLang === 'id'}>ID</span> / <span class:active-lang={currentLang === 'en'}>EN</span>
+			</button>
+			<button class="btn-mulai" onclick={() => goto(resolve('/create'))}>{t.start}</button>
 		</div>
 	</nav>
 
 	<!-- HERO -->
-	<section class="hero">
+	<section class="hero {heroRevealed ? 'revealed' : ''}">
 		<div class="hero-glow"></div>
 		<div class="hero-content">
 			<div class="hero-left">
 				<div class="badge">
 					<span class="dot-green"></span>
-					<svg
-						width="12"
-						height="12"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					>
-						<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-						<path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-					</svg>
-					END-TO-END ENCRYPTED
+					{t.badge}
 				</div>
-				<h1>Bicara Bebas,<br /><span class="accent">Tanpa Jejak,</span><br />Tanpa Identitas.</h1>
+				<h1>
+					{t.h1_1}<br />
+					<span class="accent">{t.h1_2}</span><br />
+					{t.h1_3}
+				</h1>
 				<p class="hero-sub">
-					Platform komunikasi paling aman untuk percakapan rahasia. Tidak ada login, tidak ada
-					pelacakan, dan data Anda hilang seketika setelah selesai.
+					{t.sub}
 				</p>
 				<div class="hero-btns">
 					<button class="btn-primary" onclick={() => goto(resolve('/create'))}
-						>Mulai Chat Sekarang →</button
+						>{t.btnStart}</button
 					>
-					<button class="btn-ghost" onclick={scrollToSecurity}>Pelajari Protokol</button>
+					<button class="btn-ghost" onclick={() => scrollTo('docs')}>{t.btnProtocol}</button>
 				</div>
 			</div>
 
@@ -130,12 +279,31 @@
 						</svg>
 					</div>
 					<div class="chat-body">
-						<div class="msg-them">Apakah data ini benar-benar tidak tersimpan di server?</div>
-						<div class="msg-me">
-							Tepat sekali. Menggunakan enkripsi X3DH dan Double Ratchet. Segera setelah tab
-							didelete.
-						</div>
-						<div class="msg-them">Luar biasa. Mulai kirim dokumen rahasianya.</div>
+						{#if visibleMsgs >= 1}
+							<div class="msg-them anim-pop-them">Apakah data ini benar-benar tidak tersimpan di server?</div>
+						{/if}
+
+						{#if visibleMsgs >= 2}
+							<div class="msg-me anim-pop-me">
+								Tepat sekali. Menggunakan enkripsi X3DH dan Double Ratchet. Segera setelah tab
+								didelete.
+							</div>
+						{/if}
+
+						{#if visibleMsgs >= 3}
+							<div class="msg-them anim-pop-them">Luar biasa. Mulai kirim dokumen rahasianya.</div>
+						{/if}
+
+						{#if isTyping}
+							<div
+								class="typing-bar {typingUser === 'You' ? 'me anim-pop-me' : 'them anim-pop-them'}"
+							>
+								<span class="typing-text">{typingUser} is typing</span>
+								<span class="typing-dot"></span>
+								<span class="typing-dot"></span>
+								<span class="typing-dot"></span>
+							</div>
+						{/if}
 					</div>
 					<div class="chat-input-bar">
 						<div class="input-fake">
@@ -173,8 +341,8 @@
 		</div>
 	</section>
 
-	<!-- SIAP MEMULAI -->
-	<section class="cta-section" id="cta">
+	<!-- SIAP MEMULAI (FEATURES) -->
+	<section class="cta-section {ctaRevealed ? 'revealed' : ''}" id="features">
 		<h2>Siap Memulai?</h2>
 		<p class="section-sub">Pilih bagaimana Anda ingin terhubung dengan orang lain secara anonim.</p>
 		<div class="cta-cards">
@@ -222,7 +390,7 @@
 	</section>
 
 	<!-- 3 LANGKAH -->
-	<section class="steps" id="security">
+	<section class="steps {stepsRevealed ? 'revealed' : ''}" id="security">
 		<span class="workflow-label">WORKFLOW</span>
 		<h2>3 Langkah Sederhana</h2>
 		<div class="steps-row">
@@ -244,8 +412,8 @@
 		</div>
 	</section>
 
-	<!-- PRIVASI TANPA KOMPROMI -->
-	<section class="features" id="features">
+	<!-- PRIVASI TANPA KOMPROMI (DOCUMENTATION) -->
+	<section class="features {featuresRevealed ? 'revealed' : ''}" id="docs">
 		<h2>Privasi Tanpa Kompromi</h2>
 		<p class="section-sub">
 			UMBRA dirancang oleh pakar keamanan untuk memberikan perlindungan mutlak bagi identitas dan
@@ -409,13 +577,15 @@
 	}
 
 	.nav-center {
+		position: relative;
 		display: flex;
-		gap: 32px;
+		gap: 36px;
+		align-items: center;
 	}
 	.nav-link {
-		font-family: 'Inter', sans-serif;
-		font-size: 14px;
-		font-weight: 500;
+		font-family: 'Space Grotesk', sans-serif;
+		font-size: 15px;
+		font-weight: 600;
 		color: #4b5563;
 		text-decoration: none;
 		background: none;
@@ -423,27 +593,20 @@
 		cursor: pointer;
 		position: relative;
 		padding: 6px 0;
-		transition: color 0.2s;
-	}
-	.nav-link::after {
-		content: '';
-		position: absolute;
-		bottom: -4px;
-		left: 0;
-		right: 0;
-		height: 2px;
-		background-color: #00658d;
-		border-radius: 1px;
-		transform: scaleX(0);
-		transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-		transform-origin: center;
+		transition: color 0.2s ease;
 	}
 	.nav-link.active {
 		color: #00658d;
-		font-weight: 600;
+		font-weight: 700;
 	}
-	.nav-link.active::after {
-		transform: scaleX(1);
+	.sliding-indicator {
+		position: absolute;
+		bottom: -4px;
+		height: 2.5px;
+		background-color: #00658d;
+		border-radius: 2px;
+		transition: left 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+		pointer-events: none;
 	}
 	.nav-link:hover {
 		color: #0f1c2c;
@@ -454,12 +617,29 @@
 		align-items: center;
 		gap: 24px;
 	}
-	.lang {
-		font-family: 'Inter', sans-serif;
-		font-size: 14px;
-		color: #4b5563;
-		font-weight: 500;
+	.lang-toggle {
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		padding: 6px 12px;
+		font-family: 'Space Grotesk', sans-serif;
+		font-size: 13px;
+		font-weight: 600;
+		color: #94a3b8;
 		cursor: pointer;
+		transition: all 0.2s ease;
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+	}
+	.lang-toggle:hover {
+		border-color: #00aeef;
+		color: #0f1c2c;
+		background: #ffffff;
+	}
+	.active-lang {
+		color: #00658d;
+		font-weight: 700;
 	}
 	.btn-mulai {
 		background: #00aeef;
@@ -500,7 +680,6 @@
 		left: 55%;
 		transform: translate(-20%, -50%);
 		z-index: 0;
-		pointer-events: none;
 	}
 
 	.hero-content {
@@ -514,8 +693,31 @@
 		gap: 64px;
 	}
 
+	@keyframes fadeInUp {
+		from {
+			opacity: 0;
+			transform: translateY(20px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	.hero-left, .hero-right, .feature-card, .cta-card {
+		animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+	}
+
 	.hero-left {
 		max-width: 520px;
+		animation-delay: 0.1s;
+	}
+
+	.hero-right {
+		flex: 1;
+		display: flex;
+		justify-content: flex-end;
+		animation-delay: 0.25s;
 	}
 
 	.badge {
@@ -568,51 +770,27 @@
 		gap: 16px;
 	}
 
-	/* ── MICRO-INTERACTIONS & TACTILE ANIMATIONS ── */
+	/* ── MICRO-INTERACTIONS ── */
 	button {
-		transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease, background 0.18s ease, color 0.18s ease;
+		transition: transform 0.15s ease, box-shadow 0.15s ease;
 		user-select: none;
 	}
 
 	button:active {
-		transform: scale(0.94) translateY(0) !important;
-		box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1) !important;
-	}
-
-	.btn-mulai {
-		background: linear-gradient(135deg, #00c6ff 0%, #00aeef 100%);
-		color: #002e42;
-		border: none;
-		padding: 10px 22px;
-		border-radius: 8px;
-		font-weight: 700;
-		font-size: 14px;
-		cursor: pointer;
-		font-family: 'Inter', sans-serif;
-		box-shadow: 0 4px 12px rgba(0, 174, 239, 0.3);
-	}
-
-	.btn-mulai:hover {
-		transform: translateY(-2px);
-		box-shadow: 0 6px 20px rgba(0, 174, 239, 0.5);
+		transform: scale(0.96) !important;
 	}
 
 	.btn-primary {
-		background: linear-gradient(135deg, #00c6ff 0%, #00aeef 100%);
-		color: #002e42;
+		background: #00aeef;
+		color: #003e58;
 		border: none;
 		padding: 14px 28px;
-		border-radius: 10px;
+		border-radius: 8px;
 		font-weight: 700;
 		font-size: 15px;
 		cursor: pointer;
 		font-family: 'Inter', sans-serif;
-		box-shadow: 0 6px 18px rgba(0, 174, 239, 0.35);
-	}
-
-	.btn-primary:hover {
-		transform: translateY(-3px);
-		box-shadow: 0 10px 25px rgba(0, 174, 239, 0.55);
+		box-shadow: 0 4px 14px rgba(0, 174, 239, 0.35);
 	}
 
 	.btn-ghost {
@@ -620,16 +798,13 @@
 		color: #0f1c2c;
 		border: 1.5px solid #cbd5e1;
 		padding: 14px 28px;
-		border-radius: 10px;
+		border-radius: 8px;
 		font-weight: 600;
 		font-size: 15px;
 		cursor: pointer;
 		font-family: 'Inter', sans-serif;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 	}
-
 	.btn-ghost:hover {
-		transform: translateY(-3px);
 		border-color: #00aeef;
 		color: #00658d;
 		box-shadow: 0 8px 20px rgba(0, 101, 141, 0.12);
@@ -764,6 +939,113 @@
 		color: white;
 		align-self: flex-end;
 		border-bottom-right-radius: 4px;
+	}
+
+	@keyframes popUpBubbleThem {
+		0% {
+			opacity: 0;
+			transform: scale(0.2) translateY(20px);
+			transform-origin: bottom left;
+		}
+		75% {
+			opacity: 1;
+			transform: scale(1.05) translateY(-2px);
+		}
+		100% {
+			opacity: 1;
+			transform: scale(1) translateY(0);
+		}
+	}
+
+	@keyframes popUpBubbleMe {
+		0% {
+			opacity: 0;
+			transform: scale(0.2) translateY(20px);
+			transform-origin: bottom right;
+		}
+		75% {
+			opacity: 1;
+			transform: scale(1.05) translateY(-2px);
+		}
+		100% {
+			opacity: 1;
+			transform: scale(1) translateY(0);
+		}
+	}
+
+	@keyframes typingPulse {
+		0%, 100% { opacity: 0.3; transform: scale(0.8); }
+		50% { opacity: 1; transform: scale(1.15); }
+	}
+
+	.anim-pop-them {
+		animation: popUpBubbleThem 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+	}
+	.anim-pop-me {
+		animation: popUpBubbleMe 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+	}
+
+	.typing-bar {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 14px;
+		background: #ffffff;
+		border: 1px solid #e2e8f0;
+		border-radius: 999px;
+		width: fit-content;
+		font-size: 11px;
+		color: #64748b;
+		font-family: 'Space Grotesk', sans-serif;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+	}
+
+	.typing-bar.them {
+		align-self: flex-start;
+	}
+
+	.typing-bar.me {
+		align-self: flex-end;
+		background: #e0f2fe;
+		border-color: #bae6fd;
+		color: #00658d;
+	}
+
+	.typing-dot {
+		width: 6px;
+		height: 6px;
+		background-color: #00aeef;
+		border-radius: 50%;
+		display: inline-block;
+		animation: dotBounce 1.2s infinite ease-in-out;
+	}
+
+	.typing-dot:nth-child(2) {
+		animation-delay: 0s;
+	}
+
+	.typing-dot:nth-child(3) {
+		animation-delay: 0.2s;
+	}
+
+	.typing-dot:nth-child(4) {
+		animation-delay: 0.4s;
+	}
+
+	@keyframes dotBounce {
+		0%, 80%, 100% {
+			transform: scale(0.6);
+			opacity: 0.4;
+		}
+		40% {
+			transform: scale(1.3) translateY(-3px);
+			opacity: 1;
+		}
+	}
+
+	@keyframes blinkCursor {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0; }
 	}
 
 	.chat-input-bar {
@@ -939,24 +1221,148 @@
 		margin: 0 auto;
 	}
 
+	/* ── SLOW & MAJESTIC SCROLL REVEALS (1.6s Duration) ── */
+
+	/* Section Titles & Subtitles Scroll Reveal */
+	.features h2,
+	.features .section-sub,
+	.steps h2,
+	.steps .workflow-label,
+	.cta-section h2,
+	.cta-section .section-sub {
+		opacity: 0;
+		transform: translateY(40px);
+		transition: opacity 1.4s cubic-bezier(0.16, 1, 0.3, 1), transform 1.4s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.features.revealed h2,
+	.steps.revealed h2,
+	.cta-section.revealed h2 {
+		opacity: 1;
+		transform: translateY(0);
+		transition-delay: 0.1s;
+	}
+
+	.features.revealed .section-sub,
+	.steps.revealed .workflow-label,
+	.cta-section.revealed .section-sub {
+		opacity: 1;
+		transform: translateY(0);
+		transition-delay: 0.25s;
+	}
+
+	/* 1. Siap Memulai? (CTA Cards - From Bottom) */
+	.cta-section .cta-card {
+		opacity: 0;
+		transform: translateY(70px);
+		transition: opacity 1.6s cubic-bezier(0.16, 1, 0.3, 1), transform 1.6s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+	.cta-section.revealed .cta-card:nth-child(1) {
+		opacity: 1;
+		transform: translateY(0);
+		transition-delay: 0.4s;
+	}
+	.cta-section.revealed .cta-card:nth-child(2) {
+		opacity: 1;
+		transform: translateY(0);
+		transition-delay: 0.7s;
+	}
+
+	/* 2. 3 Langkah Sederhana (Workflow - From Sides: Left, Bottom, Right) */
+	.steps .step:nth-child(1) {
+		opacity: 0;
+		transform: translateX(-75px);
+		transition: opacity 1.6s cubic-bezier(0.16, 1, 0.3, 1), transform 1.6s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+	.steps .step:nth-child(2) {
+		opacity: 0;
+		transform: translateY(70px);
+		transition: opacity 1.6s cubic-bezier(0.16, 1, 0.3, 1), transform 1.6s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+	.steps .step:nth-child(3) {
+		opacity: 0;
+		transform: translateX(75px);
+		transition: opacity 1.6s cubic-bezier(0.16, 1, 0.3, 1), transform 1.6s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.steps.revealed .step:nth-child(1) {
+		opacity: 1;
+		transform: translateX(0);
+		transition-delay: 0.4s;
+	}
+	.steps.revealed .step:nth-child(2) {
+		opacity: 1;
+		transform: translateY(0);
+		transition-delay: 0.7s;
+	}
+	.steps.revealed .step:nth-child(3) {
+		opacity: 1;
+		transform: translateX(0);
+		transition-delay: 1.0s;
+	}
+
+	/* 3. Privasi Tanpa Kompromi (4 Feature Cards - From Bottom) */
+	.features .feature-card {
+		opacity: 0;
+		transform: translateY(70px);
+		transition: opacity 1.6s cubic-bezier(0.16, 1, 0.3, 1), transform 1.6s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+	.features.revealed .feature-card:nth-child(1) {
+		opacity: 1;
+		transform: translateY(0);
+		transition-delay: 0.4s;
+	}
+	.features.revealed .feature-card:nth-child(2) {
+		opacity: 1;
+		transform: translateY(0);
+		transition-delay: 0.65s;
+	}
+	.features.revealed .feature-card:nth-child(3) {
+		opacity: 1;
+		transform: translateY(0);
+		transition-delay: 0.9s;
+	}
+	.features.revealed .feature-card:nth-child(4) {
+		opacity: 1;
+		transform: translateY(0);
+		transition-delay: 1.15s;
+	}
+
 	.step {
 		flex: 1;
 		text-align: center;
+		transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.7s ease;
+		cursor: pointer;
+		padding: 16px;
+		border-radius: 16px;
+	}
+
+	.step:hover {
+		transform: translateY(-10px);
 	}
 
 	.step-circle {
-		width: 56px;
-		height: 56px;
+		width: 60px;
+		height: 60px;
 		background: #e0f2fe;
 		border-radius: 9999px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		margin: 0 auto 24px;
-		font-family: 'Inter', monospace;
-		font-size: 20px;
+		font-family: 'Space Grotesk', sans-serif;
+		font-size: 22px;
 		font-weight: 700;
 		color: #00658d;
+		transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.35s ease, color 0.35s ease, box-shadow 0.35s ease;
+		box-shadow: 0 4px 12px rgba(0, 101, 141, 0.08);
+	}
+
+	.step:hover .step-circle {
+		transform: scale(1.25) translateY(-4px);
+		background: linear-gradient(135deg, #00c6ff 0%, #00aeef 100%);
+		color: #ffffff;
+		box-shadow: 0 10px 24px rgba(0, 174, 239, 0.45);
 	}
 
 	.step h3 {
@@ -1002,30 +1408,46 @@
 
 	.feature-card {
 		background: white;
-		border: 1px solid #e2e8f0;
+		border: 1.5px solid #e2e8f0;
 		border-radius: 20px;
 		padding: 40px 32px;
 		text-align: left;
 		display: flex;
 		flex-direction: column;
-		transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+		transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.35s ease, border-color 0.35s ease;
+		cursor: pointer;
 	}
 
 	.feature-card:hover {
-		transform: translateY(-6px);
-		box-shadow: 0 16px 32px -6px rgba(0, 101, 141, 0.12);
-		border-color: #82cfff;
+		transform: translateY(-12px) scale(1.02);
+		box-shadow: 0 20px 40px -8px rgba(0, 174, 239, 0.28);
+		border-color: #00aeef;
 	}
 
 	.feature-icon-box {
-		width: 48px;
-		height: 48px;
+		width: 52px;
+		height: 52px;
 		background: #e0f2fe;
-		border-radius: 12px;
+		border-radius: 14px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		margin-bottom: 24px;
+		transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.35s ease, box-shadow 0.35s ease;
+	}
+
+	.feature-card:hover .feature-icon-box {
+		transform: scale(1.25) rotate(6deg) translateY(-4px);
+		background: linear-gradient(135deg, #00c6ff 0%, #00aeef 100%);
+		box-shadow: 0 8px 20px rgba(0, 174, 239, 0.4);
+	}
+
+	.feature-card:hover .feature-icon-box svg path {
+		fill: #ffffff;
+		transition: fill 0.25s ease;
+	}box svg path {
+		fill: #ffffff;
+		transition: fill 0.25s ease;
 	}
 
 	.feature-card h3 {
