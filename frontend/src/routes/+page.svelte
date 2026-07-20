@@ -1,10 +1,35 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { onMount } from 'svelte';
+
+	let activeNav = $state('features');
 
 	function scrollToSecurity() {
 		document.querySelector('#security')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
+
+	function scrollTo(id: string) {
+		document.querySelector(`#${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
+	onMount(() => {
+		const sections = ['security', 'features', 'docs'];
+		const observers: IntersectionObserver[] = [];
+
+		sections.forEach((id) => {
+			const el = document.querySelector(`#${id}`);
+			if (!el) return;
+			const obs = new IntersectionObserver(
+				([entry]) => { if (entry.isIntersecting) activeNav = id; },
+				{ threshold: 0.35 }
+			);
+			obs.observe(el);
+			observers.push(obs);
+		});
+
+		return () => observers.forEach((o) => o.disconnect());
+	});
 </script>
 
 <svelte:head>
@@ -23,9 +48,9 @@
 			<span class="logo-text">UMBRA</span>
 		</div>
 		<div class="nav-center">
-			<a href="#features" class="nav-link active">Features</a>
-			<a href="#security" class="nav-link">Security</a>
-			<a href="#docs" class="nav-link">Documentation</a>
+			<button onclick={() => scrollTo('features')} class="nav-link {activeNav === 'features' ? 'active' : ''}">Features</button>
+			<button onclick={() => scrollTo('security')} class="nav-link {activeNav === 'security' ? 'active' : ''}">Security</button>
+			<button onclick={() => scrollTo('docs')} class="nav-link {activeNav === 'docs' ? 'active' : ''}">Documentation</button>
 		</div>
 		<div class="nav-right">
 			<span class="lang">ID/EN</span>
@@ -309,7 +334,7 @@
 	</section>
 
 	<!-- FOOTER -->
-	<footer>
+	<footer id="docs">
 		<div class="footer-top">
 			<div class="footer-brand">
 				<div class="footer-logo-row">
@@ -393,15 +418,14 @@
 		font-weight: 500;
 		color: #4b5563;
 		text-decoration: none;
+		background: none;
+		border: none;
+		cursor: pointer;
 		position: relative;
 		padding: 6px 0;
 		transition: color 0.2s;
 	}
-	.nav-link.active {
-		color: #00658d;
-		font-weight: 600;
-	}
-	.nav-link.active::after {
+	.nav-link::after {
 		content: '';
 		position: absolute;
 		bottom: -4px;
@@ -410,6 +434,16 @@
 		height: 2px;
 		background-color: #00658d;
 		border-radius: 1px;
+		transform: scaleX(0);
+		transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+		transform-origin: center;
+	}
+	.nav-link.active {
+		color: #00658d;
+		font-weight: 600;
+	}
+	.nav-link.active::after {
+		transform: scaleX(1);
 	}
 	.nav-link:hover {
 		color: #0f1c2c;
