@@ -17,6 +17,7 @@ func main() {
 	h := hub.New()
 	go h.Run()
 	roomhandler.StartQueueCleaner()
+	roomhandler.StartRoomCleaner()
 
 	app := fiber.New(fiber.Config{AppName: "Umbra Backend v1.0.0"})
 

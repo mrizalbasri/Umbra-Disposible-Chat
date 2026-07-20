@@ -427,7 +427,6 @@
 			];
 
 			roomState = 'waiting';
-			window.history.replaceState({}, '', '/chatroom'); // ponytail: clear url params
 			connectWebSocket(myEcdhPkBase64);
 		} catch (err: unknown) {
 			const errMsg =
@@ -486,7 +485,6 @@
 			];
 
 			roomState = 'chat';
-			window.history.replaceState({}, '', '/chatroom'); // ponytail: clear url params
 			startTimer();
 			connectWebSocket(myEcdhPkBase64);
 		} catch (err: unknown) {
@@ -522,7 +520,6 @@
 				matchQueueId = result.data.queueId;
 				roomId = result.data.queueId;
 				roomState = 'match_waiting';
-				window.history.replaceState({}, '', '/chatroom'); // ponytail: clear url params
 				connectWebSocket(myEcdhPkBase64);
 				return;
 			}
@@ -530,7 +527,6 @@
 			if (result.responseCode === '00' && result.data?.status === 'matched') {
 				matchQueueId = '';
 				roomId = result.data.roomId;
-				window.history.replaceState({}, '', '/chatroom'); // ponytail: clear url params
 				await transitionToMatchedRoom(result.data.peerPublicKey, myEcdhPkBase64);
 				return;
 			}
@@ -732,6 +728,8 @@
 				if (nickname) {
 					nicknameInput = nickname;
 					handleCreateRoom(); // ponytail: auto-create room if redirected from /create
+				} else {
+					goto(resolve('/create'));
 				}
 			} else if (tab === 'join') {
 				const roomCode = params.get('roomCode');
@@ -740,7 +738,12 @@
 					roomCodeInput = roomCode;
 					nicknameInput = nickname;
 					handleJoinRoom(); // ponytail: auto-join room if redirected from /join
+				} else {
+					goto(resolve('/join'));
 				}
+			} else {
+				// Tidak ada sesi dan tidak ada tab -> lempar balik ke beranda
+				goto(resolve('/'));
 			}
 		}
 

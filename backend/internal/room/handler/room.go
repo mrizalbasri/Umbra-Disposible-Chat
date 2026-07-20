@@ -2,6 +2,7 @@ package handler
 
 import (
 	"crypto/rand"
+	"log"
 	"regexp"
 	"sync"
 	"time"
@@ -242,9 +243,36 @@ func DeleteRoom(roomID string) {
 	for code, room := range roomStore.rooms {
 		if room.ID == roomID {
 			delete(roomStore.rooms, code)
+			log.Printf("🗑️ Room %s (code: %s) dihapus total dari memori", roomID, code)
 			break
 		}
 	}
+}
+
+// StartRoomCleaner menjalankan goroutine yang membersihkan room yang sudah kosong atau expired secara berkala
+func StartRoomCleaner() {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			now := time.Now()
+			var expiredCodes []string
+
+			roomStore.mu.Lock()
+			for code, room := range roomStore.rooms {
+				// Hapus jika room sudah berumur lebih dari 30 menit (ephemeral TTL)
+				if now.Sub(room.CreatedAt) > 30*time.Minute {
+					expiredCodes = append(expiredCodes, code)
+				}
+			}
+
+			for _, code := range expiredCodes {
+				delete(roomStore.rooms, code)
+				log.Printf("🧹 Room expired (>30 menit) dihapus: code=%s", code)
+			}
+			roomStore.mu.Unlock()
+		}
+	}()
 }
 
 // roomCode generates a XXXX-XX code using crypto/rand (not time-based)

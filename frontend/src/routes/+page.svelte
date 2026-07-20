@@ -568,16 +568,51 @@
 		gap: 16px;
 	}
 
+	/* ── MICRO-INTERACTIONS & TACTILE ANIMATIONS ── */
+	button {
+		transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease, background 0.18s ease, color 0.18s ease;
+		user-select: none;
+	}
+
+	button:active {
+		transform: scale(0.94) translateY(0) !important;
+		box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1) !important;
+	}
+
+	.btn-mulai {
+		background: linear-gradient(135deg, #00c6ff 0%, #00aeef 100%);
+		color: #002e42;
+		border: none;
+		padding: 10px 22px;
+		border-radius: 8px;
+		font-weight: 700;
+		font-size: 14px;
+		cursor: pointer;
+		font-family: 'Inter', sans-serif;
+		box-shadow: 0 4px 12px rgba(0, 174, 239, 0.3);
+	}
+
+	.btn-mulai:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 6px 20px rgba(0, 174, 239, 0.5);
+	}
+
 	.btn-primary {
-		background: #00aeef;
-		color: #003e58;
+		background: linear-gradient(135deg, #00c6ff 0%, #00aeef 100%);
+		color: #002e42;
 		border: none;
 		padding: 14px 28px;
-		border-radius: 8px;
-		font-weight: 600;
+		border-radius: 10px;
+		font-weight: 700;
 		font-size: 15px;
 		cursor: pointer;
-		font-family: 'Inter';
+		font-family: 'Inter', sans-serif;
+		box-shadow: 0 6px 18px rgba(0, 174, 239, 0.35);
+	}
+
+	.btn-primary:hover {
+		transform: translateY(-3px);
+		box-shadow: 0 10px 25px rgba(0, 174, 239, 0.55);
 	}
 
 	.btn-ghost {
@@ -585,11 +620,56 @@
 		color: #0f1c2c;
 		border: 1.5px solid #cbd5e1;
 		padding: 14px 28px;
-		border-radius: 8px;
+		border-radius: 10px;
 		font-weight: 600;
 		font-size: 15px;
 		cursor: pointer;
 		font-family: 'Inter', sans-serif;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+	}
+
+	.btn-ghost:hover {
+		transform: translateY(-3px);
+		border-color: #00aeef;
+		color: #00658d;
+		box-shadow: 0 8px 20px rgba(0, 101, 141, 0.12);
+	}
+
+	.btn-teal {
+		background: linear-gradient(135deg, #0088b3 0%, #006c8b 100%);
+		color: white;
+		border: none;
+		padding: 14px 24px;
+		border-radius: 10px;
+		font-weight: 700;
+		font-size: 15px;
+		cursor: pointer;
+		font-family: 'Inter', sans-serif;
+		box-shadow: 0 4px 14px rgba(0, 108, 139, 0.3);
+	}
+
+	.btn-teal:hover {
+		transform: translateY(-3px);
+		box-shadow: 0 8px 22px rgba(0, 108, 139, 0.45);
+	}
+
+	.btn-outline-card {
+		background: white;
+		color: #0f1c2c;
+		border: 2px solid #cbd5e1;
+		padding: 14px 24px;
+		border-radius: 10px;
+		font-weight: 700;
+		font-size: 15px;
+		cursor: pointer;
+		font-family: 'Inter', sans-serif;
+	}
+
+	.btn-outline-card:hover {
+		transform: translateY(-3px);
+		border-color: #00aeef;
+		color: #00658d;
+		box-shadow: 0 8px 20px rgba(0, 174, 239, 0.2);
 	}
 
 	/* ── CHAT CARD ── */
@@ -764,6 +844,13 @@
 		flex-direction: column;
 		align-items: center;
 		text-align: center;
+		transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+	}
+
+	.cta-card:hover {
+		transform: translateY(-6px);
+		box-shadow: 0 16px 32px -6px rgba(0, 101, 141, 0.15);
+		border-color: #00aeef;
 	}
 
 	.cta-card.featured {
@@ -921,6 +1008,13 @@
 		text-align: left;
 		display: flex;
 		flex-direction: column;
+		transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+	}
+
+	.feature-card:hover {
+		transform: translateY(-6px);
+		box-shadow: 0 16px 32px -6px rgba(0, 101, 141, 0.12);
+		border-color: #82cfff;
 	}
 
 	.feature-icon-box {
