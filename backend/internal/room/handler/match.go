@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"sync"
 	"time"
 	"umbra-backend/internal/crypto"
@@ -9,12 +10,19 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	queueTTL      = 5 * time.Minute
+	cleanInterval = 60 * time.Second
+	maxRoomMembers = 5
+)
+
 // Menampung data user yang sedang mengantre di pool
 type QueueItem struct {
-	QueueID   string
-	RoomID    string
-	PublicKey string
-	Nickname  string
+	QueueID     string
+	RoomID      string
+	PublicKey   string
+	Nickname    string
+	EnqueuedAt  time.Time
 }
 
 // matchStore menggunakan in-memory storage
@@ -80,12 +88,14 @@ func MatchQueue(c *fiber.Ctx) error {
 	}
 
 	matchStore.mu.Lock()
-	defer matchStore.mu.Unlock()
 
-	// 1. Cari apakah ada user lain di pool antrean
+	// 1. Cari peer yang BERBEDA publicKey (fix: cegah self-match)
 	var peerQueueID string
 	var peerData QueueItem
 	for id, item := range matchStore.queues {
+		if item.PublicKey == req.PublicKey {
+			continue // skip diri sendiri
+		}
 		peerQueueID = id
 		peerData = item
 		break
@@ -95,6 +105,7 @@ func MatchQueue(c *fiber.Ctx) error {
 	if peerQueueID != "" {
 		// Hapus pasangan dari antrean pool karena sudah match
 		delete(matchStore.queues, peerQueueID)
+		matchStore.mu.Unlock() // fix: unlock sebelum acquire roomStore lock
 
 		// Gunakan room yang sudah dibuat saat user pertama masuk waiting
 		roomID := peerData.RoomID
@@ -129,6 +140,15 @@ func MatchQueue(c *fiber.Ctx) error {
 	roomID := newQueueID // room sementara untuk menunggu peer (dipakai juga saat matched)
 	code := roomCode()
 
+	matchStore.queues[newQueueID] = QueueItem{
+		QueueID:    newQueueID,
+		RoomID:     roomID,
+		PublicKey:  req.PublicKey,
+		Nickname:   req.Nickname,
+		EnqueuedAt: time.Now(),
+	}
+	matchStore.mu.Unlock() // fix: unlock sebelum acquire roomStore lock
+
 	roomStore.mu.Lock()
 	roomStore.rooms[code] = &RoomData{
 		ID:   roomID,
@@ -139,17 +159,12 @@ func MatchQueue(c *fiber.Ctx) error {
 				Nickname:  req.Nickname,
 			},
 		},
-		Status:    "waiting",
-		CreatedAt: time.Now(),
+		Status:     "waiting",
+		Type:       "match",
+		MaxMembers: 2,
+		CreatedAt:  time.Now(),
 	}
 	roomStore.mu.Unlock()
-
-	matchStore.queues[newQueueID] = QueueItem{
-		QueueID:   newQueueID,
-		RoomID:    roomID,
-		PublicKey: req.PublicKey,
-		Nickname:  req.Nickname,
-	}
 
 	return c.JSON(MatchWaitingStandardResponse{
 		ResponseMessage: "Masuk waiting pool, menunggu pasangan.",
@@ -166,14 +181,14 @@ func CancelQueue(c *fiber.Ctx) error {
 	queueID := c.Params("queueId")
 
 	matchStore.mu.Lock()
-	defer matchStore.mu.Unlock()
-
 	queue, exists := matchStore.queues[queueID]
 	if !exists {
+		matchStore.mu.Unlock()
 		return fail(c, 404, "11", "queueId tidak ditemukan atau sudah tidak aktif")
 	}
-
 	delete(matchStore.queues, queueID)
+	matchStore.mu.Unlock()
+
 	DeleteRoom(queue.RoomID)
 
 	return c.JSON(CancelQueueStandardResponse{
@@ -183,4 +198,31 @@ func CancelQueue(c *fiber.Ctx) error {
 			Status: "cancelled",
 		},
 	})
+}
+
+// StartQueueCleaner menjalankan goroutine yang membersihkan ghost queue entry secara berkala
+// ponytail: simple ticker sweep, upgrade ke priority queue kalau queue bisa ribuan entry
+func StartQueueCleaner() {
+	go func() {
+		ticker := time.NewTicker(cleanInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			now := time.Now()
+			var expiredRoomIDs []string
+
+			matchStore.mu.Lock()
+			for id, item := range matchStore.queues {
+				if now.Sub(item.EnqueuedAt) > queueTTL {
+					expiredRoomIDs = append(expiredRoomIDs, item.RoomID)
+					delete(matchStore.queues, id)
+					log.Printf("🧹 Queue expired, dihapus: queueId=%s roomId=%s", id, item.RoomID)
+				}
+			}
+			matchStore.mu.Unlock()
+
+			for _, roomID := range expiredRoomIDs {
+				DeleteRoom(roomID)
+			}
+		}
+	}()
 }

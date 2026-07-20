@@ -26,11 +26,13 @@ type MemberCryptoData struct {
 }
 
 type RoomData struct {
-	ID        string
-	Code      string
-	Members   map[string]MemberCryptoData // memberID -> sepasang Public Key & Nickname
-	Status    string
-	CreatedAt time.Time
+	ID         string
+	Code       string
+	Members    map[string]MemberCryptoData // memberID -> sepasang Public Key & Nickname
+	Status     string
+	Type       string                      // "custom" atau "match"
+	MaxMembers int                         // 5 untuk custom, 2 untuk match
+	CreatedAt  time.Time
 }
 
 type CreateRoomRequest struct {
@@ -114,8 +116,10 @@ func CreateRoom(c *fiber.Ctx) error {
 				Nickname:  req.Nickname,
 			},
 		},
-		Status:    "waiting", // Status awal: waiting
-		CreatedAt: time.Now(),
+		Status:     "waiting", // Status awal: waiting
+		Type:       "custom",  // Custom group chat
+		MaxMembers: 5,         // Maksimal 5 anggota untuk custom room
+		CreatedAt:  time.Now(),
 	}
 
 	roomStore.mu.Lock()
@@ -154,8 +158,15 @@ func JoinRoom(c *fiber.Ctx) error {
 	if !exists {
 		return fail(c, 404, "11", "Room tidak ditemukan") // Sesuai Error Code 11
 	}
-	if len(room.Members) >= 2 {
-		return fail(c, 409, "14", "Room sudah penuh, maksimal 2 anggota") // Sesuai Error Code 14
+	if room.Type == "match" {
+		return fail(c, 403, "18", "Kode room ini khusus untuk Random Match")
+	}
+	maxCap := room.MaxMembers
+	if maxCap == 0 {
+		maxCap = 5
+	}
+	if len(room.Members) >= maxCap {
+		return fail(c, 409, "14", "Room sudah penuh, maksimal 5 anggota") // Sesuai Error Code 14
 	}
 
 	// Ambil data publicKey milik user pertama (peer) untuk proses key exchange
@@ -208,6 +219,19 @@ func RoomStatus(c *fiber.Ctx) error {
 
 	// DIUBAH DI SINI: Disamakan persis dengan "Penjelasan Response" pada dokumen contract
 	return fail(c, 404, "11", "Room tidak ditemukan atau sudah dihapus dari memori") // Sesuai Error Code 11
+}
+
+// GetRoomType mengembalikan tipe room ("custom" atau "match") berdasarkan roomID
+func GetRoomType(roomID string) string {
+	roomStore.mu.RLock()
+	defer roomStore.mu.RUnlock()
+
+	for _, room := range roomStore.rooms {
+		if room.ID == roomID {
+			return room.Type
+		}
+	}
+	return "custom"
 }
 
 // DeleteRoom menghapus ruangan dari roomStore berdasarkan roomID (untuk mencegah memory leak)

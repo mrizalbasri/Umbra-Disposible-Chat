@@ -99,13 +99,17 @@ func (h *Hub) Run() {
 					log.Printf("❌ Client keluar dari Room: %s (memberId=%s)", client.RoomID, client.MemberID)
 
 					remainingCount := len(connections)
+					roomType := roomhandler.GetRoomType(client.RoomID)
 
-					if remainingCount == 1 {
+					if remainingCount == 0 {
+						// tidak ada member tersisa, room otomatis dibersihkan via DeleteRoom di defer
+					} else if roomType == "match" && remainingCount == 1 {
+						// Random Match (1-on-1): Jika 1 orang keluar, pasangan tersisa dapat notif room_destroyed
 						for peer := range connections {
 							destroyedNotify, _ := json.Marshal(map[string]interface{}{
 								"event": "room_destroyed",
 								"payload": map[string]string{
-									"reason": "all_members_left",
+									"reason": "peer_left",
 								},
 							})
 							_ = peer.Conn.WriteMessage(websocket.TextMessage, destroyedNotify)
@@ -113,7 +117,8 @@ func (h *Hub) Run() {
 							close(peer.Send)
 							delete(connections, peer)
 						}
-					} else if remainingCount > 1 {
+					} else {
+						// Custom Group Room (hingga 5 orang): Kirim peer_left ke member tersisa, room tetep jalan
 						for peer := range connections {
 							leftNotify, _ := json.Marshal(map[string]interface{}{
 								"event": "peer_left",
@@ -265,6 +270,7 @@ func (c *Client) writePump() {
 	}()
 
 	for message := range c.Send {
+		_ = c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
 			return
 		}
