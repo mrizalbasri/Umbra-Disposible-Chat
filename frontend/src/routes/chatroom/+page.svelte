@@ -16,13 +16,11 @@
 		verify
 	} from '$lib/crypto';
 
-	import { env } from '$env/dynamic/public';
-	import { activeSession, type ActiveSession } from '$lib/sessionStore';
+	import { getApiBaseUrl, getWsBaseUrl } from '$lib/config';
 
-	// API and WS Configuration (dynamic with fallback to localhost)
-	const BACKEND_HOST = env.PUBLIC_BACKEND_URL || 'http://localhost:8080';
-	const BASE_URL = `${BACKEND_HOST}/v1/api`;
-	const WS_BASE_URL = `${BACKEND_HOST.replace(/^http/, 'ws')}/ws`;
+	// API and WS Configuration
+	const BASE_URL = getApiBaseUrl();
+	const WS_BASE_URL = getWsBaseUrl();
 
 	// roomState: set to 'setup' by default to render the real flow
 	let roomState = $state<'setup' | 'waiting' | 'match_waiting' | 'chat'>('setup');
@@ -42,6 +40,9 @@
 	let roomId = $state('');
 	let memberId = $state('');
 	let partnerNickname = $state('');
+
+	// Flow guard for Svelte dev-mode double-mount
+	let autoFlowBootstrapped = false;
 
 	// Deriving user initials dynamically
 	let myInitials = $derived(myNickname ? myNickname.slice(0, 2).toUpperCase() : 'ME');
@@ -674,86 +675,44 @@
 		];
 	}
 
-	// Initialize view based on query tab
+	// Initialize view based on query tab (single-path initialization)
 	onMount(() => {
-		let session: ActiveSession | null = null;
-		activeSession.subscribe((val) => {
-			session = val;
-		})();
+		if (autoFlowBootstrapped) return;
+		autoFlowBootstrapped = true;
 
-		const activeSessionData = session as ActiveSession | null;
-		if (activeSessionData) {
-			roomId = activeSessionData.roomId;
-			myEcdhKeyPair = activeSessionData.myEcdhKeyPair;
-			myEcdsaKeyPair = activeSessionData.myEcdsaKeyPair;
-			myEcdsaPkBase64 = activeSessionData.myEcdsaPkBase64;
-			peerEcdhPublicKey = activeSessionData.peerEcdhPublicKey;
-			aesKey = activeSessionData.aesKey;
-			myNickname = activeSessionData.myNickname;
-			memberId = activeSessionData.memberId;
-			roomState = 'chat';
+		const params = new URLSearchParams(window.location.search);
+		const tab = params.get('tab');
 
-			// Connect or reuse WebSocket connection
-			if (activeSessionData.socket) {
-				socket = activeSessionData.socket;
-				isConnected = true;
-				bindWebSocketHandlers();
-				if (aesKey) {
-					sendHandshake();
-				}
+		if (tab === 'match') {
+			nicknameInput = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
+			handleStartMatchmaking();
+		} else if (tab === 'create') {
+			const nickname = params.get('nickname');
+			if (nickname) {
+				nicknameInput = nickname;
+				handleCreateRoom();
 			} else {
-				exportPublicKey(myEcdhKeyPair!.publicKey).then((myEcdhPkBase64) => {
-					connectWebSocket(myEcdhPkBase64);
-				});
+				goto(resolve('/create'));
 			}
-
-			messages = [
-				{
-					id: 'init-sys',
-					type: 'system',
-					text: 'Session established. Messages will self-destruct on disconnect.',
-					boxed: true
-				}
-			];
-			startTimer();
-			activeSession.set(null); // clear session store so fresh reload redirects out
+		} else if (tab === 'join') {
+			const roomCode = params.get('roomCode');
+			const nickname = params.get('nickname');
+			if (roomCode && nickname) {
+				roomCodeInput = roomCode;
+				nicknameInput = nickname;
+				handleJoinRoom();
+			} else {
+				goto(resolve('/join'));
+			}
 		} else {
-			const params = new URLSearchParams(window.location.search);
-			const tab = params.get('tab');
-			if (tab === 'match') {
-				nicknameInput = `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
-				handleStartMatchmaking(); // ponytail: bypass nickname form and start match directly
-			} else if (tab === 'create') {
-				const nickname = params.get('nickname');
-				if (nickname) {
-					nicknameInput = nickname;
-					handleCreateRoom(); // ponytail: auto-create room if redirected from /create
-				} else {
-					goto(resolve('/create'));
-				}
-			} else if (tab === 'join') {
-				const roomCode = params.get('roomCode');
-				const nickname = params.get('nickname');
-				if (roomCode && nickname) {
-					roomCodeInput = roomCode;
-					nicknameInput = nickname;
-					handleJoinRoom(); // ponytail: auto-join room if redirected from /join
-				} else {
-					goto(resolve('/join'));
-				}
-			} else {
-				// Tidak ada sesi dan tidak ada tab -> lempar balik ke beranda
-				goto(resolve('/'));
-			}
+			// Tidak ada tab query -> lempar balik ke beranda
+			goto(resolve('/'));
 		}
 
 		scrollToBottom();
 
 		return () => {
 			stopTimer();
-			if (socket) {
-				socket.close();
-			}
 		};
 	});
 </script>

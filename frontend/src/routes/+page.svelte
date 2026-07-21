@@ -168,7 +168,6 @@
 			clearTimeout(t5);
 			window.removeEventListener('scroll', handleScroll);
 			window.removeEventListener('resize', handleResize);
-			revealObserver.disconnect();
 		};
 	});
 </script>
