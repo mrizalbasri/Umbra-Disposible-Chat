@@ -1067,17 +1067,6 @@
 										<span class="material-symbols-outlined text-[18px]">delete_sweep</span>
 										<span>Clear Chat</span>
 									</button>
-									<button
-										onclick={() => {
-											toastMessage = 'Notifications muted';
-											showToast = true;
-											setTimeout(() => (showToast = false), 2000);
-										}}
-										class="w-full text-left px-4 py-2 text-sm text-on-surface hover:bg-surface-container transition-colors flex items-center space-x-2"
-									>
-										<span class="material-symbols-outlined text-[18px]">volume_off</span>
-										<span>Mute Session</span>
-									</button>
 								</div>
 							{/if}
 						</div>
